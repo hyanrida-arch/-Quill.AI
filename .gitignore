@@ -1,0 +1,22 @@
+# Flutter
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+.pub-cache/
+.pub/
+build/
+.idea/
+.vscode/
+
+# iOS
+**/ios/Flutter/.last_build_id
+**/ios/Pods/
+
+# macOS
+**/macos/Flutter/ephemeral/
+.DS_Store
+
+# Android
+**/android/.gradle/
+**/android/local.properties
