@@ -39,9 +39,9 @@ class SideDrawer extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // Profile header
+            // Profile header (فيه الإشعارات والإعدادات حدا السمية)
             Padding(
-              padding: const EdgeInsets.fromLTRB(24, 24, 24, 20),
+              padding: const EdgeInsets.fromLTRB(20, 24, 12, 20),
               child: Row(
                 children: [
                   Container(
@@ -61,7 +61,7 @@ class SideDrawer extends StatelessWidget {
                       ),
                     ),
                   ),
-                  const SizedBox(width: 16),
+                  const SizedBox(width: 12),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -92,6 +92,16 @@ class SideDrawer extends StatelessWidget {
                       ],
                     ),
                   ),
+                  // 1. زر الإشعارات (الناقوس)
+                  IconButton(
+                    icon: const Icon(Icons.notifications_none, color: AppColors.deepNavy, size: 22),
+                    onPressed: () => onComingSoon('Notifications'),
+                  ),
+                  // 2. زر الإعدادات (الترس)
+                  IconButton(
+                    icon: const Icon(Icons.settings_outlined, color: AppColors.deepNavy, size: 22),
+                    onPressed: () => onComingSoon('Settings'),
+                  ),
                 ],
               ),
             ),
@@ -121,27 +131,20 @@ class SideDrawer extends StatelessWidget {
                       onTap: () => onSelect(AppSection.calendar),
                     ),
                     _DrawerRow(
+                      icon: Icons.track_changes_outlined,
+                      label: 'Habits',
+                      isSoon: true,
+                      onTap: () => onComingSoon('Habits'),
+                    ),
+                    _DrawerRow(
                       icon: Icons.timer_outlined,
                       label: 'Pomodoro',
                       isActive: current == AppSection.pomodoro,
                       onTap: () => onSelect(AppSection.pomodoro),
                     ),
                     const Padding(
-                      padding:
-                          EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                      padding: EdgeInsets.symmetric(horizontal: 24, vertical: 12),
                       child: Divider(height: 1, color: AppColors.border),
-                    ),
-                    _DrawerRow(
-                      icon: Icons.bar_chart_outlined,
-                      label: 'Statistics',
-                      isSoon: true,
-                      onTap: () => onComingSoon('Statistics'),
-                    ),
-                    _DrawerRow(
-                      icon: Icons.track_changes_outlined,
-                      label: 'Habits',
-                      isSoon: true,
-                      onTap: () => onComingSoon('Habits'),
                     ),
                     _DrawerRow(
                       icon: Icons.menu_book_outlined,
@@ -161,6 +164,12 @@ class SideDrawer extends StatelessWidget {
                       isSoon: true,
                       onTap: () => onComingSoon('Classroom'),
                     ),
+                    _DrawerRow(
+                      icon: Icons.bar_chart_outlined,
+                      label: 'Statistics',
+                      isSoon: true,
+                      onTap: () => onComingSoon('Statistics'),
+                    ),
                   ],
                 ),
               ),
@@ -169,12 +178,7 @@ class SideDrawer extends StatelessWidget {
             const Divider(height: 1, color: AppColors.border),
             const SizedBox(height: 8),
 
-            _DrawerRow(
-              icon: Icons.settings_outlined,
-              label: 'Settings',
-              isSoon: true,
-              onTap: () => onComingSoon('Settings'),
-            ),
+            // Settings تحيدات من هنا، بقات غير Sign Out بوحدها
             _DrawerRow(
               icon: Icons.logout,
               label: 'Sign Out',
@@ -245,8 +249,7 @@ class _DrawerRow extends StatelessWidget {
             ),
             if (isSoon)
               Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                 decoration: BoxDecoration(
                   color: AppColors.lightTeal,
                   borderRadius: BorderRadius.circular(6),

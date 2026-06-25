@@ -4,6 +4,11 @@ import 'package:flutter/services.dart';
 import '../../theme/app_colors.dart';
 import '../../models/task.dart';
 
+// هادو هما الـ Imports ديال النوافذ اللي غيتحلو
+import '../../widgets/tasks/priority_picker.dart';
+import '../../widgets/tasks/advanced_date_picker.dart';
+import '../../widgets/tasks/focus_pomodoro_sheet.dart';
+
 class LocalSubtask {
   String title;
   bool isDone;
@@ -38,8 +43,7 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> {
     super.initState();
     _titleController = TextEditingController(text: widget.task.title);
     _descController = TextEditingController(
-      text:
-          'This chapter covers supply and demand fundamentals, market equilibrium, and price elasticity.',
+      text: 'This chapter covers supply and demand fundamentals, market equilibrium, and price elasticity.',
     );
     _currentPriority = widget.task.priority;
     _currentDate = widget.task.dueDate;
@@ -75,8 +79,7 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> {
     if (_currentDate == null) return 'No Date';
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
-    final dateOnly =
-        DateTime(_currentDate!.year, _currentDate!.month, _currentDate!.day);
+    final dateOnly = DateTime(_currentDate!.year, _currentDate!.month, _currentDate!.day);
     final diff = dateOnly.difference(today).inDays;
     if (diff == 0) return 'Today';
     if (diff == 1) return 'Tomorrow';
@@ -95,8 +98,7 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> {
         backgroundColor: AppColors.white,
         elevation: 0,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios_new,
-              color: AppColors.deepNavy, size: 20),
+          icon: const Icon(Icons.arrow_back_ios_new, color: AppColors.deepNavy, size: 20),
           onPressed: () => Navigator.pop(context),
         ),
         actions: [
@@ -124,13 +126,12 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> {
                         color: AppColors.deepNavy,
                         borderRadius: BorderRadius.circular(16),
                       ),
-                      child: Column(
+                      child: const Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Row(
+                          Row(
                             children: [
-                              Icon(Icons.auto_awesome,
-                                  color: AppColors.teal, size: 14),
+                              Icon(Icons.auto_awesome, color: AppColors.teal, size: 14),
                               SizedBox(width: 8),
                               Text('MYSTRO · INSIGHT',
                                   style: TextStyle(
@@ -140,13 +141,10 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> {
                                       letterSpacing: 1.2)),
                             ],
                           ),
-                          const SizedBox(height: 12),
-                          const Text(
+                          SizedBox(height: 12),
+                          Text(
                             'This is a high-cognitive task. Your peak focus is 9-11 AM tomorrow - want me to schedule it then?',
-                            style: TextStyle(
-                                color: AppColors.white,
-                                fontSize: 14,
-                                height: 1.5),
+                            style: TextStyle(color: AppColors.white, fontSize: 14, height: 1.5),
                           ),
                         ],
                       ),
@@ -171,17 +169,63 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> {
                     ),
                     const SizedBox(height: 16),
 
-                    // Meta Pills
+                    // ==========================================
+                    // Meta Pills (التحديث الجديد اللي كيحل النوافذ)
+                    // ==========================================
                     Wrap(
                       spacing: 8,
+                      runSpacing: 8,
                       children: [
-                        _buildPill(Icons.flag_outlined,
-                            _currentPriority.color, 14,
-                            _currentPriority.label.replaceAll(' Priority', '')),
-                        _buildPill(Icons.calendar_today_outlined,
-                            AppColors.slateGray, 14, _getDateLabel()),
-                        _buildPill(Icons.access_time, AppColors.slateGray, 14,
-                            '$_currentDuration min'),
+                        // 1. Priority Pill
+                        _buildPill(
+                          icon: Icons.flag_outlined,
+                          text: _currentPriority == TaskPriority.none ? 'Priority' : _currentPriority.label.replaceAll(' Priority', ''),
+                          iconColor: _currentPriority == TaskPriority.none ? AppColors.slateGray : _currentPriority.color,
+                          onTap: () {
+                            PriorityPicker.show(
+                              context,
+                              currentPriority: _currentPriority,
+                              onSelected: (newPriority) {
+                                setState(() => _currentPriority = newPriority);
+                              },
+                            );
+                          },
+                        ),
+
+                        // 2. Date Pill
+                        _buildPill(
+                          icon: Icons.calendar_today_outlined,
+                          text: _currentDate == null ? 'No Date' : _getDateLabel(),
+                          isSolid: _currentDate != null, // كتولي كحلة يلا كاين تاريخ
+                          onTap: () async {
+                            final result = await AdvancedDatePicker.show(
+                              context,
+                              initialDate: _currentDate ?? DateTime.now(),
+                            );
+                            if (result != null && result['date'] != null) {
+                              setState(() {
+                                _currentDate = result['date'];
+                              });
+                            }
+                          },
+                        ),
+
+                        // 3. Duration/Time Pill
+                        _buildPill(
+                          icon: Icons.access_time,
+                          text: _currentDuration == 0 ? 'Time' : '$_currentDuration min',
+                          onTap: () async {
+                            final newDuration = await FocusPomodoroSheet.show(
+                              context,
+                              initialMinutes: _currentDuration == 0 ? 25 : _currentDuration,
+                            );
+                            if (newDuration != null) {
+                              setState(() {
+                                _currentDuration = newDuration;
+                              });
+                            }
+                          },
+                        ),
                       ],
                     ),
                     const SizedBox(height: 24),
@@ -190,10 +234,7 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> {
                     TextField(
                       controller: _descController,
                       maxLines: null,
-                      style: const TextStyle(
-                          fontSize: 15,
-                          color: AppColors.slateGray,
-                          height: 1.5),
+                      style: const TextStyle(fontSize: 15, color: AppColors.slateGray, height: 1.5),
                       decoration: const InputDecoration(
                         border: InputBorder.none,
                         isDense: true,
@@ -205,10 +246,7 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> {
 
                     // Subtasks
                     Text('Subtasks ($completedCount/$totalCount)',
-                        style: const TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w700,
-                            color: AppColors.deepNavy)),
+                        style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: AppColors.deepNavy)),
                     const SizedBox(height: 16),
 
                     ...List.generate(_subtasks.length, (index) {
@@ -220,8 +258,7 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> {
                           alignment: Alignment.centerRight,
                           padding: const EdgeInsets.only(right: 20),
                           color: AppColors.red.withValues(alpha: 0.1),
-                          child: const Icon(Icons.delete_outline,
-                              color: AppColors.red),
+                          child: const Icon(Icons.delete_outline, color: AppColors.red),
                         ),
                         onDismissed: (_) => _deleteSubtask(index),
                         child: Padding(
@@ -232,26 +269,17 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> {
                             child: Row(
                               children: [
                                 AnimatedContainer(
-                                  duration:
-                                      const Duration(milliseconds: 200),
+                                  duration: const Duration(milliseconds: 200),
                                   width: 22,
                                   height: 22,
                                   decoration: BoxDecoration(
                                     shape: BoxShape.circle,
-                                    color: sub.isDone
-                                        ? AppColors.deepNavy
-                                        : AppColors.white,
+                                    color: sub.isDone ? AppColors.deepNavy : AppColors.white,
                                     border: Border.all(
-                                        color: sub.isDone
-                                            ? AppColors.deepNavy
-                                            : AppColors.slateGray
-                                                .withValues(alpha: 0.5),
+                                        color: sub.isDone ? AppColors.deepNavy : AppColors.slateGray.withValues(alpha: 0.5),
                                         width: 1.5),
                                   ),
-                                  child: sub.isDone
-                                      ? const Icon(Icons.check,
-                                          size: 14, color: AppColors.white)
-                                      : null,
+                                  child: sub.isDone ? const Icon(Icons.check, size: 14, color: AppColors.white) : null,
                                 ),
                                 const SizedBox(width: 12),
                                 Expanded(
@@ -259,12 +287,8 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> {
                                     sub.title,
                                     style: TextStyle(
                                       fontSize: 15,
-                                      color: sub.isDone
-                                          ? AppColors.slateGray
-                                          : AppColors.deepNavy,
-                                      decoration: sub.isDone
-                                          ? TextDecoration.lineThrough
-                                          : null,
+                                      color: sub.isDone ? AppColors.slateGray : AppColors.deepNavy,
+                                      decoration: sub.isDone ? TextDecoration.lineThrough : null,
                                     ),
                                   ),
                                 ),
@@ -278,19 +302,15 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> {
                     // Add subtask input
                     Row(
                       children: [
-                        const Icon(Icons.add,
-                            size: 22, color: AppColors.slateGray),
+                        const Icon(Icons.add, size: 22, color: AppColors.slateGray),
                         const SizedBox(width: 12),
                         Expanded(
                           child: TextField(
                             controller: _newSubtaskController,
-                            style: const TextStyle(
-                                fontSize: 15,
-                                color: AppColors.deepNavy),
+                            style: const TextStyle(fontSize: 15, color: AppColors.deepNavy),
                             decoration: const InputDecoration(
                               hintText: 'Add a subtask...',
-                              hintStyle:
-                                  TextStyle(color: AppColors.slateGray),
+                              hintStyle: TextStyle(color: AppColors.slateGray),
                               border: InputBorder.none,
                             ),
                             onSubmitted: _addSubtask,
@@ -309,10 +329,7 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> {
               padding: const EdgeInsets.fromLTRB(20, 16, 20, 10),
               decoration: BoxDecoration(
                 color: AppColors.white,
-                border: Border(
-                    top: BorderSide(
-                        color:
-                            AppColors.border.withValues(alpha: 0.5))),
+                border: Border(top: BorderSide(color: AppColors.border.withValues(alpha: 0.5))),
               ),
               child: SizedBox(
                 width: double.infinity,
@@ -320,21 +337,16 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> {
                   onPressed: () {
                     HapticFeedback.mediumImpact();
                     ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                          content: Text('Pomodoro coming soon!')),
+                      const SnackBar(content: Text('Pomodoro coming soon!')),
                     );
                   },
                   icon: const Icon(Icons.play_arrow, size: 18),
-                  label: const Text('Start Pomodoro',
-                      style: TextStyle(
-                          fontSize: 15, fontWeight: FontWeight.w700)),
+                  label: const Text('Start Pomodoro', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: AppColors.deepNavy,
                     foregroundColor: AppColors.white,
-                    padding:
-                        const EdgeInsets.symmetric(vertical: 16),
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(16)),
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                     elevation: 0,
                   ),
                 ),
@@ -346,26 +358,47 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> {
     );
   }
 
-  Widget _buildPill(
-      IconData icon, Color iconColor, double iconSize, String text) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: AppColors.white,
-        border: Border.all(color: AppColors.border),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: iconSize, color: iconColor),
-          const SizedBox(width: 6),
-          Text(text,
-              style: const TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                  color: AppColors.deepNavy)),
-        ],
+  // ==========================================
+  // دالة _buildPill الجديدة اللي كتدعم التفاعل
+  // ==========================================
+  Widget _buildPill({
+    required IconData icon,
+    required String text,
+    required VoidCallback onTap,
+    Color? iconColor,
+    bool isSolid = false,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: isSolid ? AppColors.deepNavy : AppColors.white,
+          border: Border.all(
+            color: isSolid ? AppColors.deepNavy : AppColors.border,
+            width: 1,
+          ),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              icon,
+              size: 14,
+              color: isSolid ? AppColors.white : (iconColor ?? AppColors.slateGray),
+            ),
+            const SizedBox(width: 6),
+            Text(
+              text,
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: isSolid ? AppColors.white : AppColors.deepNavy,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

@@ -8,8 +8,9 @@ import '../chat/mystro_chat_screen.dart';
 import 'home_screen.dart';
 import 'coming_soon_screen.dart';
 import '../tasks/tasks_body.dart';
+import '../focus/pomodoro_dashboard.dart';
+import '../calendar/calendar_body.dart';
 
-/// The main app container shown AFTER auth (FlowController -> Routes.home).
 class AppShell extends StatefulWidget {
   final String userName;
   final String userEmail;
@@ -35,31 +36,29 @@ class _AppShellState extends State<AppShell> {
   bool _drawerOpen = false;
   String? _comingSoon;
 
+  Task? _pomodoroInitialTask;
+
   void _openDrawer() => _scaffoldKey.currentState?.openDrawer();
   void _closeDrawer() => _scaffoldKey.currentState?.closeDrawer();
 
   void _selectSection(AppSection s) {
     _closeDrawer();
-    switch (s) {
-      case AppSection.home:
-        setState(() {
-          _section = AppSection.home;
-          _comingSoon = null;
-        });
-        break;
-      case AppSection.tasks:
-        setState(() {
-          _section = AppSection.tasks;
-          _comingSoon = null;
-        });
-        break;
-      case AppSection.calendar:
-        setState(() => _comingSoon = 'Calendar');
-        break;
-      case AppSection.pomodoro:
-        setState(() => _comingSoon = 'Pomodoro');
-        break;
-    }
+    setState(() {
+      _section = s;
+      _comingSoon = null;
+      if (s == AppSection.pomodoro) {
+        _pomodoroInitialTask = null;
+      }
+    });
+  }
+
+  void _startPomodoroWithTask(Task task) {
+    _closeDrawer();
+    setState(() {
+      _pomodoroInitialTask = task;
+      _section = AppSection.pomodoro;
+      _comingSoon = null;
+    });
   }
 
   void _openComingSoon(String feature) {
@@ -97,49 +96,68 @@ class _AppShellState extends State<AppShell> {
       body: SafeArea(
         child: showComingSoon
             ? ComingSoonScreen(
-                feature: _comingSoon!,
-                onBack: _backToHome,
-                onNotify: () {},
-              )
+          feature: _comingSoon!,
+          onBack: _backToHome,
+          onNotify: () {},
+        )
             : Column(
-                children: [
-                  AppHeader(
-                    onMenuTap: _openDrawer,
-                    onClassroomTap: () => _openComingSoon('Classroom'),
-                    onNotificationTap: () => _openComingSoon('Notifications'),
-                  ),
-                  Expanded(child: _sectionBody()),
-                ],
+          children: [
+            // 1. خبينا الهيدر القديم ملي نكونو في Tasks
+            if (_section != AppSection.tasks)
+              AppHeader(
+                onMenuTap: _openDrawer,
+                onClassroomTap: () => _openComingSoon('Classroom'),
+                onNotificationTap: () => _openComingSoon('Notifications'),
               ),
+            Expanded(child: _sectionBody()),
+          ],
+        ),
       ),
-      floatingActionButton: (!showComingSoon && !_drawerOpen)
+      floatingActionButton:
+      (!showComingSoon && !_drawerOpen && _section != AppSection.pomodoro)
           ? _MystroFab(
-              onTap: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                      builder: (context) => const MystroChatScreen()),
-                );
-              },
-            )
+        onTap: () {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+                builder: (context) => const MystroChatScreen()),
+          );
+        },
+      )
           : null,
     );
   }
 
   Widget _sectionBody() {
-    if (_section == AppSection.tasks) {
-      return TasksBody(isTeacher: widget.isTeacher);
+    switch (_section) {
+      case AppSection.tasks:
+        return TasksBody(
+          isTeacher: widget.isTeacher,
+          onMenuTap: _openDrawer,
+          onClassroomTap: () => _openComingSoon('Classroom'), // <-- دوزنا ليه الكلاسروم
+          userName: widget.userName,
+        );
+
+      case AppSection.pomodoro:
+        return PomodoroDashboard(
+          key: ValueKey('pomodoro_${_pomodoroInitialTask?.id ?? 'none'}'),
+          initialTask: _pomodoroInitialTask,
+        );
+
+      case AppSection.calendar:
+        return const CalendarBody();
+
+      case AppSection.home:
+        return HomeBody(
+          userName: widget.userName,
+          isTeacher: widget.isTeacher,
+          onSeeAllTasks: () => setState(() => _section = AppSection.tasks),
+          onStartPomodoro: _startPomodoroWithTask,
+        );
     }
-    return HomeBody(
-      userName: widget.userName,
-      isTeacher: widget.isTeacher,
-      onSeeAllTasks: () => setState(() => _section = AppSection.tasks),
-      onStartPomodoro: (Task _) => setState(() => _comingSoon = 'Pomodoro'),
-    );
   }
 }
 
-// ─── Mystro floating button ───
 class _MystroFab extends StatelessWidget {
   final VoidCallback onTap;
   const _MystroFab({required this.onTap});
@@ -163,14 +181,12 @@ class _MystroFab extends StatelessWidget {
             ),
           ],
         ),
-        child: const Icon(Icons.auto_awesome,
-            color: AppColors.teal, size: 24),
+        child: const Icon(Icons.auto_awesome, color: AppColors.teal, size: 24),
       ),
     );
   }
 }
 
-// ─── Sign Out dialog ───
 class _SignOutDialog extends StatelessWidget {
   const _SignOutDialog();
 
@@ -192,8 +208,7 @@ class _SignOutDialog extends StatelessWidget {
                 color: AppColors.red.withValues(alpha: 0.08),
                 shape: BoxShape.circle,
               ),
-              child:
-                  const Icon(Icons.logout, color: AppColors.red, size: 26),
+              child: const Icon(Icons.logout, color: AppColors.red, size: 26),
             ),
             const SizedBox(height: 18),
             const Text(
@@ -207,7 +222,7 @@ class _SignOutDialog extends StatelessWidget {
             const SizedBox(height: 8),
             const Text(
               "Are you sure you want to sign out? You'll need to sign in again "
-              "to access your tasks and progress.",
+                  "to access your tasks and progress.",
               textAlign: TextAlign.center,
               style: TextStyle(
                 fontSize: 13.5,
@@ -227,17 +242,13 @@ class _SignOutDialog extends StatelessWidget {
                       decoration: BoxDecoration(
                         color: AppColors.white,
                         borderRadius: BorderRadius.circular(12),
-                        border: Border.all(
-                            color: AppColors.border, width: 1.5),
+                        border: Border.all(color: AppColors.border, width: 1.5),
                       ),
-                      child: const Text(
-                        'Cancel',
-                        style: TextStyle(
-                          fontSize: 14.5,
-                          fontWeight: FontWeight.w600,
-                          color: AppColors.deepNavy,
-                        ),
-                      ),
+                      child: const Text('Cancel',
+                          style: TextStyle(
+                              fontSize: 14.5,
+                              fontWeight: FontWeight.w600,
+                              color: AppColors.deepNavy)),
                     ),
                   ),
                 ),
@@ -252,14 +263,11 @@ class _SignOutDialog extends StatelessWidget {
                         color: AppColors.red,
                         borderRadius: BorderRadius.circular(12),
                       ),
-                      child: const Text(
-                        'Sign Out',
-                        style: TextStyle(
-                          fontSize: 14.5,
-                          fontWeight: FontWeight.w600,
-                          color: AppColors.white,
-                        ),
-                      ),
+                      child: const Text('Sign Out',
+                          style: TextStyle(
+                              fontSize: 14.5,
+                              fontWeight: FontWeight.w600,
+                              color: AppColors.white)),
                     ),
                   ),
                 ),

@@ -184,6 +184,26 @@ class Task {
   }
 
   // ============================================================
+  // Helper Method: dateLabelFor (هادي هي اللي كانت ناقصة)
+  // ============================================================
+  static String dateLabelFor(DateTime? date) {
+    if (date == null) return 'No Date';
+
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final dateOnly = DateTime(date.year, date.month, date.day);
+
+    final diff = dateOnly.difference(today).inDays;
+
+    if (diff == 0) return 'Today';
+    if (diff == 1) return 'Tomorrow';
+    if (diff == -1) return 'Yesterday';
+    if (diff > 1 && diff <= 7) return 'In $diff days';
+
+    return '${date.day}/${date.month}';
+  }
+
+  // ============================================================
   // SIMPLE NLP — parse "tomorrow", "today", "next week" from text
   // ============================================================
 
@@ -195,22 +215,22 @@ class Task {
 
     final patterns = <RegExp, ({String label, DateTime date})>{
       RegExp(r'\btoday\b', caseSensitive: false): (
-        label: 'Today',
-        date: DateTime(now.year, now.month, now.day),
+      label: 'Today',
+      date: DateTime(now.year, now.month, now.day),
       ),
       RegExp(r'\btomorrow\b', caseSensitive: false): (
-        label: 'Tomorrow',
-        date:
-            DateTime(now.year, now.month, now.day).add(const Duration(days: 1)),
+      label: 'Tomorrow',
+      date:
+      DateTime(now.year, now.month, now.day).add(const Duration(days: 1)),
       ),
       RegExp(r'\bnext week\b', caseSensitive: false): (
-        label: 'Next Week',
-        date:
-            DateTime(now.year, now.month, now.day).add(const Duration(days: 7)),
+      label: 'Next Week',
+      date:
+      DateTime(now.year, now.month, now.day).add(const Duration(days: 7)),
       ),
       RegExp(r'\bin (\d+) days?\b', caseSensitive: false): (
-        label: '',
-        date: now,
+      label: '',
+      date: now,
       ),
     };
 
