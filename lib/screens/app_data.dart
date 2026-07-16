@@ -6,6 +6,9 @@ class QuillUserData {
   int age = 20;
   String? role;
 
+  // Profile
+  String? avatarPath;
+
   // Student calibration
   int focusSpan = 2;
   String? learningStyle;

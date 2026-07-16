@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'theme/qai_theme.dart';
+import 'theme/app_colors.dart';
 import 'screens/app_data.dart';
 import 'screens/screens_onboarding.dart';
 import 'screens/screens_identity.dart';
@@ -7,6 +8,7 @@ import 'screens/screens_calibration.dart';
 import 'screens/screens_auth.dart';
 import 'screens/screens_recovery.dart';
 import 'screens/home/app_shell.dart';
+import 'services/local_storage_service.dart';
 
 void main() {
   runApp(const QuillAIApp());
@@ -38,6 +40,34 @@ class _FlowControllerState extends State<FlowController> {
   String _route = Routes.splash;
   final List<String> _history = [];
   final QuillUserData _data = QuillUserData();
+  bool _bootstrapping = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _bootstrap();
+  }
+
+  // Loads whatever was saved from a previous launch (login state, profile,
+  // avatar) before the very first frame that matters, so a returning user
+  // lands on Home instead of redoing the onboarding wizard every time they
+  // open the app.
+  Future<void> _bootstrap() async {
+    final loggedIn = await LocalStorageService.isLoggedIn();
+    final avatarPath = await LocalStorageService.loadAvatarPath();
+    if (loggedIn) {
+      final profile = await LocalStorageService.loadProfile();
+      _data.fullName = profile['fullName'] ?? '';
+      _data.email = profile['email'] ?? '';
+      _data.role = profile['role'];
+    }
+    _data.avatarPath = avatarPath;
+    if (!mounted) return;
+    setState(() {
+      _bootstrapping = false;
+      _route = loggedIn ? Routes.home : Routes.splash;
+    });
+  }
 
   void _go(String route) {
     setState(() {
@@ -86,6 +116,17 @@ class _FlowControllerState extends State<FlowController> {
 
   @override
   Widget build(BuildContext context) {
+    if (_bootstrapping) {
+      return const Scaffold(
+        backgroundColor: AppColors.white,
+        body: Center(
+          child: CircularProgressIndicator(
+            color: AppColors.teal,
+            strokeWidth: 2.5,
+          ),
+        ),
+      );
+    }
     return AnimatedSwitcher(
       duration: const Duration(milliseconds: 300),
       transitionBuilder: (child, anim) =>
@@ -258,6 +299,11 @@ class _FlowControllerState extends State<FlowController> {
           }),
           onBack: _back,
           onCreate: () {
+            LocalStorageService.saveLoggedInProfile(
+              fullName: _data.fullName,
+              email: _data.email.isNotEmpty ? _data.email : _data.signInEmail,
+              role: _data.role ?? 'student',
+            );
             setState(() {
               _history.clear();
               _route = Routes.home;
@@ -277,6 +323,18 @@ class _FlowControllerState extends State<FlowController> {
           }),
           onBack: _history.isNotEmpty ? _back : null,
           onSignIn: () {
+            // No real backend to check credentials against yet — this
+            // mirrors a returning user, so fall back to whatever name/role
+            // is already known instead of wiping it.
+            LocalStorageService.saveLoggedInProfile(
+              fullName: _data.fullName.isNotEmpty
+                  ? _data.fullName
+                  : _data.signInEmail.split('@').first,
+              email: _data.signInEmail.isNotEmpty
+                  ? _data.signInEmail
+                  : _data.email,
+              role: _data.role ?? 'student',
+            );
             setState(() {
               _history.clear();
               _route = Routes.home;
@@ -330,7 +388,13 @@ class _FlowControllerState extends State<FlowController> {
           userEmail:
               _data.email.isNotEmpty ? _data.email : _data.signInEmail,
           isTeacher: _data.role == 'teacher',
+          avatarPath: _data.avatarPath,
+          onAvatarChanged: (path) {
+            LocalStorageService.saveAvatarPath(path);
+            setState(() => _data.avatarPath = path);
+          },
           onSignOut: () {
+            LocalStorageService.signOut();
             setState(() {
               _history.clear();
               _route = Routes.signIn;

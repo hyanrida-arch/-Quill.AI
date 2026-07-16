@@ -4,15 +4,21 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../theme/app_colors.dart';
 import '../../models/task.dart';
+import '../../models/focus_session.dart';
 
 class PomodoroActiveScreen extends StatefulWidget {
   final Task task;
   final int durationMinutes;
 
+  // Reality gets written back here — a FocusSession is emitted whenever this
+  // session ends, however it ends (naturally, skipped, or backed out of).
+  final ValueChanged<FocusSession> onSessionComplete;
+
   const PomodoroActiveScreen({
     super.key,
     required this.task,
     required this.durationMinutes,
+    required this.onSessionComplete,
   });
 
   @override
@@ -25,6 +31,7 @@ class _PomodoroActiveScreenState extends State<PomodoroActiveScreen> {
   late int _remainingSeconds;
   bool _isPaused = false;
   bool _isCompleted = false;
+  int _pauseCount = 0;
 
   @override
   void initState() {
@@ -51,20 +58,38 @@ class _PomodoroActiveScreenState extends State<PomodoroActiveScreen> {
     });
   }
 
+  FocusSession _buildSession(FocusOutcome outcome) {
+    return FocusSession(
+      id: 'session_${DateTime.now().microsecondsSinceEpoch}',
+      taskId: widget.task.id,
+      taskTitle: widget.task.title,
+      plannedMinutes: widget.durationMinutes,
+      actualSeconds: _totalSeconds - _remainingSeconds,
+      pauseCount: _pauseCount,
+      outcome: outcome,
+      completedAt: DateTime.now(),
+    );
+  }
+
   void _onTimerComplete() {
     _timer?.cancel();
     HapticFeedback.heavyImpact();
     setState(() => _isCompleted = true);
+    widget.onSessionComplete(_buildSession(FocusOutcome.completed));
   }
 
   void _togglePause() {
     HapticFeedback.mediumImpact();
     if (_isPaused) {
       _startTimer();
+      setState(() => _isPaused = false);
     } else {
       _timer?.cancel();
+      setState(() {
+        _isPaused = true;
+        _pauseCount++;
+      });
     }
-    setState(() => _isPaused = !_isPaused);
   }
 
   void _resetTimer() {
@@ -74,13 +99,28 @@ class _PomodoroActiveScreenState extends State<PomodoroActiveScreen> {
       _remainingSeconds = _totalSeconds;
       _isPaused = false;
       _isCompleted = false;
+      _pauseCount = 0;
     });
     _startTimer();
   }
 
   void _skipSession() {
+    if (_isCompleted) return;
     HapticFeedback.lightImpact();
-    _onTimerComplete();
+    _timer?.cancel();
+    setState(() => _isCompleted = true);
+    widget.onSessionComplete(_buildSession(FocusOutcome.interrupted));
+  }
+
+  // Backing out before the timer naturally finishes or gets skipped still
+  // counts as reality — an abandoned session, logged only if any time was
+  // actually spent.
+  void _handleClose() {
+    _timer?.cancel();
+    if (!_isCompleted && _remainingSeconds < _totalSeconds) {
+      widget.onSessionComplete(_buildSession(FocusOutcome.abandoned));
+    }
+    Navigator.pop(context);
   }
 
   String _formatTime(int seconds) {
@@ -105,17 +145,8 @@ class _PomodoroActiveScreenState extends State<PomodoroActiveScreen> {
         elevation: 0,
         leading: IconButton(
           icon: const Icon(Icons.close, color: AppColors.deepNavy),
-          onPressed: () {
-            _timer?.cancel();
-            Navigator.pop(context);
-          },
+          onPressed: _handleClose,
         ),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.remove, color: AppColors.deepNavy),
-            onPressed: () {},
-          ),
-        ],
       ),
       body: SafeArea(
         child: Column(

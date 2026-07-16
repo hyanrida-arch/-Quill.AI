@@ -4,14 +4,38 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../theme/app_colors.dart';
 import '../../models/task.dart';
+import '../../models/focus_session.dart';
+import 'focus_history_screen.dart';
 
 enum TimerMode { pomodoro, stopwatch }
 
 class PomodoroDashboard extends StatefulWidget {
   /// Optional pre-selected task (when launched from Home/Tasks).
   final Task? initialTask;
+  final VoidCallback? onMenuTap;
+  final VoidCallback? onClassroomTap;
 
-  const PomodoroDashboard({super.key, this.initialTask});
+  // Read-only view over AppShell's single source of truth — the task
+  // picker binds a session to one of these instead of its own mock list.
+  final List<Task> tasks;
+
+  // Read here too, so "Daily Goal" reflects real sessions logged today
+  // instead of a number that never changes.
+  final List<FocusSession> sessions;
+
+  // Reality gets written back here whenever a focus segment ends (natural
+  // completion, or the user resets mid-session/mid-stopwatch).
+  final ValueChanged<FocusSession> onSessionComplete;
+
+  const PomodoroDashboard({
+    super.key,
+    this.initialTask,
+    this.onMenuTap,
+    this.onClassroomTap,
+    required this.tasks,
+    required this.sessions,
+    required this.onSessionComplete,
+  });
 
   @override
   State<PomodoroDashboard> createState() => _PomodoroDashboardState();
@@ -30,10 +54,20 @@ class _PomodoroDashboardState extends State<PomodoroDashboard> {
   late int _secondsLeft;
   int _stopwatchSeconds = 0;
   int _sessionsCompleted = 0;
+  int _pauseCount = 0;
 
-  // Daily Stats (Mock)
-  final int _completedToday = 3;
+  // Daily goal target is still a fixed number (no settings screen to
+  // configure it yet), but how many count toward it is real now — pulled
+  // from AppShell's session ledger instead of a number frozen at 3 forever.
   final int _dailyGoal = 6;
+  int get _completedToday {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    return widget.sessions.where((s) {
+      final d = DateTime(s.completedAt.year, s.completedAt.month, s.completedAt.day);
+      return d == today && s.isSuccessful;
+    }).length;
+  }
 
   final List<String> _noises = [
     'Silence 🤫',
@@ -63,7 +97,10 @@ class _PomodoroDashboardState extends State<PomodoroDashboard> {
     HapticFeedback.lightImpact();
     if (_isRunning) {
       _timer?.cancel();
-      setState(() => _isRunning = false);
+      setState(() {
+        _isRunning = false;
+        if (_mode == TimerMode.pomodoro && !_isBreak) _pauseCount++;
+      });
     } else {
       setState(() => _isRunning = true);
       _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
@@ -86,12 +123,31 @@ class _PomodoroDashboardState extends State<PomodoroDashboard> {
 
   void _handlePomodoroDone() {
     HapticFeedback.heavyImpact();
+    final wasFocusSegment = !_isBreak;
+    final justFinishedMinutes = _pomodoroMinutes;
+
     setState(() {
       _isRunning = false;
       if (!_isBreak) _sessionsCompleted++;
       _isBreak = !_isBreak;
       _secondsLeft = (_isBreak ? 5 : _pomodoroMinutes) * 60;
     });
+
+    // A focus segment (not a break) that ran all the way down is a
+    // completed FocusSession — logged against whatever task was bound.
+    if (wasFocusSegment && _selectedTask != null) {
+      widget.onSessionComplete(FocusSession(
+        id: 'session_${DateTime.now().microsecondsSinceEpoch}',
+        taskId: _selectedTask!.id,
+        taskTitle: _selectedTask!.title,
+        plannedMinutes: justFinishedMinutes,
+        actualSeconds: justFinishedMinutes * 60,
+        pauseCount: _pauseCount,
+        outcome: FocusOutcome.completed,
+        completedAt: DateTime.now(),
+      ));
+      _pauseCount = 0;
+    }
 
     // Show completion toast
     ScaffoldMessenger.of(context).showSnackBar(
@@ -110,9 +166,39 @@ class _PomodoroDashboardState extends State<PomodoroDashboard> {
   void _resetTimer() {
     HapticFeedback.mediumImpact();
     _timer?.cancel();
+
+    // Bailing out mid-segment is still reality worth logging, same as the
+    // full-screen Pomodoro flow does when you back out early.
+    if (_selectedTask != null) {
+      if (_mode == TimerMode.pomodoro && !_isBreak && _secondsLeft < _pomodoroMinutes * 60) {
+        widget.onSessionComplete(FocusSession(
+          id: 'session_${DateTime.now().microsecondsSinceEpoch}',
+          taskId: _selectedTask!.id,
+          taskTitle: _selectedTask!.title,
+          plannedMinutes: _pomodoroMinutes,
+          actualSeconds: (_pomodoroMinutes * 60) - _secondsLeft,
+          pauseCount: _pauseCount,
+          outcome: FocusOutcome.abandoned,
+          completedAt: DateTime.now(),
+        ));
+      } else if (_mode == TimerMode.stopwatch && _stopwatchSeconds > 0) {
+        widget.onSessionComplete(FocusSession(
+          id: 'session_${DateTime.now().microsecondsSinceEpoch}',
+          taskId: _selectedTask!.id,
+          taskTitle: _selectedTask!.title,
+          plannedMinutes: 0,
+          actualSeconds: _stopwatchSeconds,
+          pauseCount: _pauseCount,
+          outcome: FocusOutcome.completed,
+          completedAt: DateTime.now(),
+        ));
+      }
+    }
+
     setState(() {
       _isRunning = false;
       _isBreak = false;
+      _pauseCount = 0;
       if (_mode == TimerMode.pomodoro) {
         _secondsLeft = _pomodoroMinutes * 60;
       } else {
@@ -122,7 +208,7 @@ class _PomodoroDashboardState extends State<PomodoroDashboard> {
   }
 
   void _pickTask() {
-    final tasks = Task.mockStudentTasks();
+    final tasks = widget.tasks.where((t) => !t.isDone).toList();
     showModalBottomSheet(
       context: context,
       backgroundColor: AppColors.white,
@@ -226,7 +312,37 @@ class _PomodoroDashboardState extends State<PomodoroDashboard> {
         top: false,
         child: Column(
           children: [
-            const SizedBox(height: 12),
+            // 0. Header (menu + title + history + classroom)
+            Padding(
+              padding: const EdgeInsets.only(left: 12, right: 20, top: 12),
+              child: Row(
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.menu, color: AppColors.deepNavy, size: 28),
+                    onPressed: widget.onMenuTap,
+                  ),
+                  const SizedBox(width: 4),
+                  const Text(
+                    'Pomodoro',
+                    style: TextStyle(fontSize: 28, fontWeight: FontWeight.w800, color: AppColors.deepNavy, letterSpacing: -0.5),
+                  ),
+                  const Spacer(),
+                  IconButton(
+                    tooltip: 'Focus history',
+                    icon: const Icon(Icons.bar_chart_outlined, color: AppColors.deepNavy, size: 24),
+                    onPressed: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (_) => const FocusHistoryScreen()),
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.school_outlined, color: AppColors.deepNavy, size: 26),
+                    onPressed: widget.onClassroomTap,
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 4),
 
             // 1. Mode Switcher
             AnimatedOpacity(

@@ -3,9 +3,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../theme/app_colors.dart';
 import '../../models/task.dart';
+import '../../models/focus_session.dart';
 import '../../widgets/tasks/add_task_sheet.dart';
 import '../chat/mystro_chat_screen.dart';
 import 'task_detail_screen.dart';
+import 'task_search_screen.dart';
 
 enum TaskTab { all, today, upcoming, completed }
 
@@ -15,12 +17,28 @@ class TasksBody extends StatefulWidget {
   final VoidCallback onClassroomTap;
   final String userName;
 
+  // Task is the single source of truth, owned by AppShell. TasksBody just
+  // renders a view over it and writes back through these callbacks instead
+  // of keeping its own mock copy.
+  final List<Task> tasks;
+  final ValueChanged<Task> onAdd;
+  final ValueChanged<Task> onToggleDone;
+  final ValueChanged<Task> onDelete;
+  final ValueChanged<Task> onUpdate;
+  final ValueChanged<FocusSession> onSessionComplete;
+
   const TasksBody({
     super.key,
     required this.isTeacher,
     required this.onMenuTap,
     required this.onClassroomTap,
     required this.userName,
+    required this.tasks,
+    required this.onAdd,
+    required this.onToggleDone,
+    required this.onDelete,
+    required this.onUpdate,
+    required this.onSessionComplete,
   });
 
   @override
@@ -29,32 +47,22 @@ class TasksBody extends StatefulWidget {
 
 class _TasksBodyState extends State<TasksBody> {
   TaskTab _selectedTab = TaskTab.today;
-  late List<Task> _allTasks;
-  int _localCounter = 0;
   bool _showCompleted = true;
 
-  @override
-  void initState() {
-    super.initState();
-    _allTasks = List.from(Task.mockTasks(widget.isTeacher));
-  }
-
-  String _generateTaskId() {
-    return 'task_${DateTime.now().millisecondsSinceEpoch}_${_localCounter++}';
-  }
+  String _generateTaskId() => 'task_${DateTime.now().microsecondsSinceEpoch}';
 
   // ============================================================
   // FILTERED TASKS PER TAB
   // ============================================================
 
   List<Task> get _allList {
-    return _allTasks.where((t) => _showCompleted || !t.isDone).toList();
+    return widget.tasks.where((t) => _showCompleted || !t.isDone).toList();
   }
 
   List<Task> get _todayTasks {
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
-    return _allTasks.where((t) {
+    return widget.tasks.where((t) {
       if (!_showCompleted && t.isDone) return false;
       if (t.dueDate == null) {
         return t.dueLabel == 'Today' || t.dueLabel == 'Yesterday';
@@ -67,7 +75,7 @@ class _TasksBodyState extends State<TasksBody> {
   List<Task> get _upcomingTasks {
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
-    return _allTasks.where((t) {
+    return widget.tasks.where((t) {
       if (!_showCompleted && t.isDone) return false;
       if (t.dueDate == null) {
         return t.dueLabel == 'Tomorrow' ||
@@ -80,7 +88,7 @@ class _TasksBodyState extends State<TasksBody> {
   }
 
   List<Task> get _completedTasks {
-    return _allTasks.where((t) => t.isDone).toList();
+    return widget.tasks.where((t) => t.isDone).toList();
   }
 
   List<Task> get _visibleTasks {
@@ -133,43 +141,67 @@ class _TasksBodyState extends State<TasksBody> {
   void _openAddTask() {
     showAddTaskSheet(
       context,
-      onAdd: (title, date) {
+      onAdd: (draft) {
         final newTask = Task(
           id: _generateTaskId(),
-          title: title,
+          title: draft.title,
           subject: 'New Task',
-          estimatedMinutes: 30,
-          pomodorosPlanned: 1,
-          priority: TaskPriority.medium,
-          dueLabel: _dateLabel(date),
-          dueDate: date,
+          estimatedMinutes: draft.estimatedMinutes,
+          pomodorosPlanned: draft.pomodorosPlanned ?? (draft.estimatedMinutes / 25).ceil().clamp(1, 8),
+          priority: draft.priority == TaskPriority.none ? TaskPriority.medium : draft.priority,
+          dueLabel: _dateLabel(draft.dueDate),
+          dueDate: draft.dueDate,
+          hasTime: draft.hasTime,
+          tagLabel: draft.tagLabel,
+          tagColorValue: draft.tagColorValue,
+          recurrence: draft.recurrence,
+          reminderMinutesBefore: draft.reminderMinutesBefore,
         );
-        setState(() => _allTasks.insert(0, newTask));
+        widget.onAdd(newTask);
       },
     );
   }
 
+  // Recurring tasks stay a single list row (like Google Tasks/TickTick)
+  // instead of exploding into one row per future date — completing one
+  // just advances its dueDate to the series' next occurrence, while the
+  // completed date itself is kept in completedOccurrences so Calendar can
+  // still show history correctly.
   void _toggleDone(Task task) {
     HapticFeedback.lightImpact();
-    setState(() {
-      final index = _allTasks.indexWhere((t) => t.id == task.id);
-      if (index == -1) return;
-      _allTasks[index] = _allTasks[index].copyWith(
-        status: task.isDone ? TaskStatus.pending : TaskStatus.completed,
-      );
-    });
+    if (task.recurrence.isRecurring && task.dueDate != null) {
+      final wasDone = task.isOccurrenceDone(task.dueDate!);
+      var updated = task.withOccurrenceToggled(task.dueDate!);
+      if (!wasDone) updated = updated.advanceToNextOccurrence();
+      widget.onUpdate(updated);
+      return;
+    }
+    widget.onToggleDone(task);
+  }
+
+  void _skipOccurrence(Task task) {
+    if (task.dueDate == null) return;
+    final updated = task.withOccurrenceSkipped(task.dueDate!).advanceToNextOccurrence();
+    widget.onUpdate(updated);
+    ScaffoldMessenger.of(context).clearSnackBars();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Skipped this occurrence of "${task.title}"'),
+        backgroundColor: AppColors.deepNavy,
+        behavior: SnackBarBehavior.floating,
+        margin: const EdgeInsets.all(16),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      ),
+    );
   }
 
   void _deleteTask(Task task) {
-    final removed = task;
-    final removedIndex = _allTasks.indexWhere((t) => t.id == task.id);
-
-    setState(() => _allTasks.removeWhere((t) => t.id == task.id));
+    widget.onDelete(task);
 
     ScaffoldMessenger.of(context).clearSnackBars();
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text('"${removed.title}" deleted'),
+        content: Text('"${task.title}" deleted'),
         backgroundColor: AppColors.deepNavy,
         behavior: SnackBarBehavior.floating,
         margin: const EdgeInsets.all(16),
@@ -177,25 +209,24 @@ class _TasksBodyState extends State<TasksBody> {
         action: SnackBarAction(
           label: 'Undo',
           textColor: AppColors.teal,
-          onPressed: () {
-            setState(() {
-              if (removedIndex >= 0 && removedIndex <= _allTasks.length) {
-                _allTasks.insert(removedIndex, removed);
-              } else {
-                _allTasks.add(removed);
-              }
-            });
-          },
+          // Re-adding puts it back at the top of the list rather than its
+          // exact original position — a minor trade-off of no longer owning
+          // the list locally.
+          onPressed: () => widget.onAdd(task),
         ),
       ),
     );
   }
 
-  void _openDetail(Task task) {
-    Navigator.push(
+  Future<void> _openDetail(Task task) async {
+    final updated = await Navigator.push<Task>(
       context,
-      MaterialPageRoute(builder: (_) => TaskDetailScreen(task: task)),
+      MaterialPageRoute(
+        builder: (_) => TaskDetailScreen(task: task, onSessionComplete: widget.onSessionComplete),
+      ),
     );
+    if (updated == null || !mounted) return;
+    widget.onUpdate(updated);
   }
 
   @override
@@ -220,6 +251,24 @@ class _TasksBodyState extends State<TasksBody> {
                 style: TextStyle(fontSize: 28, fontWeight: FontWeight.w800, color: AppColors.deepNavy, letterSpacing: -0.5),
               ),
               const Spacer(),
+
+              // Search across every task, independent of the selected tab.
+              IconButton(
+                icon: const Icon(Icons.search, color: AppColors.deepNavy, size: 26),
+                onPressed: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => TaskSearchScreen(
+                        tasks: widget.tasks,
+                        onUpdate: widget.onUpdate,
+                        onToggleDone: _toggleDone,
+                        onSessionComplete: widget.onSessionComplete,
+                      ),
+                    ),
+                  );
+                },
+              ),
 
               // 1. أيكون الكلاسروم (جا هو الأول مورا الفراغ)
               IconButton(
@@ -322,6 +371,7 @@ class _TasksBodyState extends State<TasksBody> {
                     task: task,
                     onToggleDone: () => _toggleDone(task),
                     onDelete: () => _deleteTask(task),
+                    onSkipOccurrence: () => _skipOccurrence(task),
                     onTap: () => _openDetail(task),
                   ),
                 );
@@ -398,10 +448,17 @@ class _TasksBodyState extends State<TasksBody> {
             if (!isCompleted) ...[
               const SizedBox(height: 32),
               ElevatedButton.icon(
+                onPressed: _openAddTask,
+                icon: const Icon(Icons.add, size: 18, color: AppColors.white),
+                label: const Text('Add task', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
+                style: ElevatedButton.styleFrom(backgroundColor: AppColors.deepNavy, foregroundColor: AppColors.white, padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)), elevation: 0),
+              ),
+              const SizedBox(height: 12),
+              TextButton.icon(
                 onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (context) => const MystroChatScreen())),
                 icon: const Icon(Icons.auto_awesome, size: 16, color: AppColors.teal),
-                label: const Text('Ask Mystro', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
-                style: ElevatedButton.styleFrom(backgroundColor: AppColors.deepNavy, foregroundColor: AppColors.white, padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)), elevation: 0),
+                label: const Text('Ask Mystro', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: AppColors.teal)),
+                style: TextButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8)),
               ),
             ]
           ],
@@ -415,9 +472,17 @@ class _SwipeableTaskCard extends StatelessWidget {
   final Task task;
   final VoidCallback onToggleDone;
   final VoidCallback onDelete;
+  final VoidCallback onSkipOccurrence;
   final VoidCallback onTap;
 
-  const _SwipeableTaskCard({super.key, required this.task, required this.onToggleDone, required this.onDelete, required this.onTap});
+  const _SwipeableTaskCard({
+    super.key,
+    required this.task,
+    required this.onToggleDone,
+    required this.onDelete,
+    required this.onSkipOccurrence,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -430,6 +495,17 @@ class _SwipeableTaskCard extends StatelessWidget {
           onToggleDone();
           return false;
         }
+        // Recurring tasks need to ask "this occurrence or the whole
+        // series?" — matches Google Calendar/TickTick's own delete prompt.
+        if (task.recurrence.isRecurring) {
+          final choice = await _showRecurringDeleteSheet(context);
+          if (choice == 'series') {
+            return true;
+          } else if (choice == 'occurrence') {
+            onSkipOccurrence();
+          }
+          return false;
+        }
         return true;
       },
       onDismissed: (direction) {
@@ -438,6 +514,38 @@ class _SwipeableTaskCard extends StatelessWidget {
       child: _TaskCard(task: task, onToggleDone: onToggleDone, onTap: onTap),
     );
   }
+}
+
+/// Returns 'series', 'occurrence', or null (cancelled/tapped outside).
+Future<String?> _showRecurringDeleteSheet(BuildContext context) {
+  return showModalBottomSheet<String>(
+    context: context,
+    backgroundColor: AppColors.white,
+    shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+    builder: (ctx) => SafeArea(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Padding(
+            padding: EdgeInsets.fromLTRB(20, 20, 20, 8),
+            child: Text('This is a repeating task', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: AppColors.deepNavy)),
+          ),
+          ListTile(
+            leading: const Icon(Icons.event_busy_outlined, color: AppColors.deepNavy),
+            title: const Text('Delete this occurrence', style: TextStyle(color: AppColors.deepNavy, fontWeight: FontWeight.w600)),
+            onTap: () => Navigator.pop(ctx, 'occurrence'),
+          ),
+          ListTile(
+            leading: const Icon(Icons.delete_forever_outlined, color: AppColors.red),
+            title: const Text('Delete entire series', style: TextStyle(color: AppColors.red, fontWeight: FontWeight.w600)),
+            onTap: () => Navigator.pop(ctx, 'series'),
+          ),
+          const SizedBox(height: 8),
+        ],
+      ),
+    ),
+  );
 }
 
 class _TaskCard extends StatelessWidget {
@@ -485,19 +593,38 @@ class _TaskCard extends StatelessWidget {
                     Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
+                        if (task.recurrence.isRecurring) ...[
+                          const Padding(
+                            padding: EdgeInsets.only(top: 3, right: 4),
+                            child: Icon(Icons.repeat, size: 14, color: AppColors.slateGray),
+                          ),
+                        ],
                         Expanded(child: AnimatedDefaultTextStyle(duration: const Duration(milliseconds: 200), style: TextStyle(fontSize: 15.5, fontWeight: FontWeight.w700, color: AppColors.deepNavy, decoration: isDone ? TextDecoration.lineThrough : TextDecoration.none, decorationColor: AppColors.slateGray, decorationThickness: 2, height: 1.3), child: Text(task.title))),
                         if (!isDone) ...[const SizedBox(width: 8), _PriorityPill(task: task, isOverdue: isOverdue)],
                       ],
                     ),
                     const SizedBox(height: 8),
-                    Row(
+                    Wrap(
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      spacing: 8,
+                      runSpacing: 4,
                       children: [
                         Container(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3), decoration: BoxDecoration(color: AppColors.subtleGray, borderRadius: BorderRadius.circular(6)), child: Text(task.subject, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: AppColors.slateGray))),
-                        const SizedBox(width: 8),
-                        const Icon(Icons.access_time, size: 12, color: AppColors.slateGray),
-                        const SizedBox(width: 4),
-                        Text('${task.estimatedMinutes} min', style: const TextStyle(fontSize: 12, color: AppColors.slateGray, fontWeight: FontWeight.w500)),
-                        if (task.dueLabel != null) ...[const SizedBox(width: 8), Container(width: 3, height: 3, decoration: const BoxDecoration(color: AppColors.slateGray, shape: BoxShape.circle)), const SizedBox(width: 8), Text(task.dueLabel!, style: TextStyle(fontSize: 12, color: isOverdue ? AppColors.red : AppColors.slateGray, fontWeight: isOverdue ? FontWeight.w700 : FontWeight.w500))],
+                        if (task.tagLabel != null)
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                            decoration: BoxDecoration(color: task.displayColor.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(6)),
+                            child: Text(task.tagLabel!, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: task.displayColor)),
+                          ),
+                        Row(mainAxisSize: MainAxisSize.min, children: [
+                          const Icon(Icons.access_time, size: 12, color: AppColors.slateGray),
+                          const SizedBox(width: 4),
+                          Text('${task.estimatedMinutes} min', style: const TextStyle(fontSize: 12, color: AppColors.slateGray, fontWeight: FontWeight.w500)),
+                        ]),
+                        if (task.displayDueLabel != null)
+                          Text(task.displayDueLabel!, style: TextStyle(fontSize: 12, color: isOverdue ? AppColors.red : AppColors.slateGray, fontWeight: isOverdue ? FontWeight.w700 : FontWeight.w500)),
+                        if (task.reminderMinutesBefore != null)
+                          const Icon(Icons.notifications, size: 13, color: AppColors.slateGray),
                       ],
                     ),
                   ],

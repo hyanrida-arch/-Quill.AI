@@ -1,6 +1,7 @@
 // lib/screens/chat/mystro_chat_screen.dart
 import 'package:flutter/material.dart';
 import '../../theme/app_colors.dart';
+import '../../services/mystro_ai_service.dart';
 
 class MystroChatScreen extends StatefulWidget {
   const MystroChatScreen({super.key});
@@ -11,19 +12,17 @@ class MystroChatScreen extends StatefulWidget {
 
 class _MystroChatScreenState extends State<MystroChatScreen> {
   final TextEditingController _controller = TextEditingController();
+  final ScrollController _scrollController = ScrollController();
+
+  bool _isLoading = false;
 
   final List<Map<String, dynamic>> _messages = [
     {
       'isAi': true,
-      'text':
-          'Based on your visual learning style, here are 3 ways to tackle Chapter 4:\n\n• Mind map of key concepts\n• Diagrams for supply/demand\n• Color-coded notes',
-      'time': '9:42 AM',
+      'text': "Hi! I'm Mystro, your AI study companion. Ask me anything about "
+          "your coursework, a concept you're stuck on, or how to plan a study session.",
+      'time': '',
     },
-    {
-      'isAi': false,
-      'text': 'Color-coded notes sounds good — how do I start?',
-      'time': '9:43 AM',
-    }
   ];
 
   final List<String> _suggestions = [
@@ -32,16 +31,55 @@ class _MystroChatScreenState extends State<MystroChatScreen> {
     'Explain simply',
   ];
 
-  void _sendMessage() {
-    if (_controller.text.trim().isEmpty) return;
-    setState(() {
-      _messages.add({
-        'isAi': false,
-        'text': _controller.text,
-        'time': 'Now',
-      });
-      _controller.clear();
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    _controller.dispose();
+    super.dispose();
+  }
+
+  String _timeNow() => TimeOfDay.now().format(context);
+
+  void _scrollToBottom() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!_scrollController.hasClients) return;
+      _scrollController.animateTo(
+        _scrollController.position.maxScrollExtent,
+        duration: const Duration(milliseconds: 250),
+        curve: Curves.easeOut,
+      );
     });
+  }
+
+  Future<void> _sendMessage([String? presetText]) async {
+    final text = (presetText ?? _controller.text).trim();
+    if (text.isEmpty || _isLoading) return;
+
+    // Snapshot history *before* appending the new user message.
+    final history = List<Map<String, dynamic>>.from(_messages);
+
+    setState(() {
+      _messages.add({'isAi': false, 'text': text, 'time': _timeNow()});
+      _controller.clear();
+      _isLoading = true;
+    });
+    _scrollToBottom();
+
+    try {
+      final reply = await MystroAiService.sendMessage(userMessage: text, history: history);
+      if (!mounted) return;
+      setState(() {
+        _messages.add({'isAi': true, 'text': reply, 'time': _timeNow()});
+        _isLoading = false;
+      });
+    } on MystroAiException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _messages.add({'isAi': true, 'text': e.message, 'time': _timeNow(), 'isError': true});
+        _isLoading = false;
+      });
+    }
+    _scrollToBottom();
   }
 
   void _showAttachmentOptions() {
@@ -93,6 +131,47 @@ class _MystroChatScreenState extends State<MystroChatScreen> {
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _buildTypingIndicator() {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 24),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            margin: const EdgeInsets.only(right: 12),
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+                color: AppColors.teal.withValues(alpha: 0.15), shape: BoxShape.circle),
+            child: const Icon(Icons.auto_awesome, color: AppColors.teal, size: 16),
+          ),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+            decoration: BoxDecoration(
+              color: AppColors.white,
+              borderRadius: const BorderRadius.only(
+                topRight: Radius.circular(16),
+                bottomLeft: Radius.circular(16),
+                bottomRight: Radius.circular(16),
+              ),
+              border: Border.all(color: AppColors.border.withValues(alpha: 0.5)),
+            ),
+            child: const SizedBox(
+              width: 20,
+              height: 12,
+              child: Center(
+                child: SizedBox(
+                  width: 14,
+                  height: 14,
+                  child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.teal),
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -189,11 +268,18 @@ class _MystroChatScreenState extends State<MystroChatScreen> {
           // Messages List
           Expanded(
             child: ListView.builder(
+              controller: _scrollController,
               padding: const EdgeInsets.all(20),
-              itemCount: _messages.length,
+              itemCount: _messages.length + (_isLoading ? 1 : 0),
               itemBuilder: (context, index) {
+                if (index == _messages.length) {
+                  return _buildTypingIndicator();
+                }
+
                 final msg = _messages[index];
                 final isAi = msg['isAi'] as bool;
+                final isError = msg['isError'] == true;
+                final time = (msg['time'] as String?) ?? '';
 
                 if (isAi) {
                   return Padding(
@@ -205,10 +291,13 @@ class _MystroChatScreenState extends State<MystroChatScreen> {
                           margin: const EdgeInsets.only(right: 12),
                           padding: const EdgeInsets.all(8),
                           decoration: BoxDecoration(
-                              color: AppColors.teal.withValues(alpha: 0.15),
+                              color: (isError ? AppColors.amber : AppColors.teal)
+                                  .withValues(alpha: 0.15),
                               shape: BoxShape.circle),
-                          child: const Icon(Icons.auto_awesome,
-                              color: AppColors.teal, size: 16),
+                          child: Icon(
+                              isError ? Icons.warning_amber_rounded : Icons.auto_awesome,
+                              color: isError ? AppColors.amber : AppColors.teal,
+                              size: 16),
                         ),
                         Expanded(
                           child: Column(
@@ -217,15 +306,18 @@ class _MystroChatScreenState extends State<MystroChatScreen> {
                               Container(
                                 padding: const EdgeInsets.all(16),
                                 decoration: BoxDecoration(
-                                  color: AppColors.white,
+                                  color: isError
+                                      ? AppColors.amberBackground
+                                      : AppColors.white,
                                   borderRadius: const BorderRadius.only(
                                     topRight: Radius.circular(16),
                                     bottomLeft: Radius.circular(16),
                                     bottomRight: Radius.circular(16),
                                   ),
                                   border: Border.all(
-                                      color: AppColors.border
-                                          .withValues(alpha: 0.5)),
+                                      color: isError
+                                          ? AppColors.amber.withValues(alpha: 0.4)
+                                          : AppColors.border.withValues(alpha: 0.5)),
                                   boxShadow: [
                                     BoxShadow(
                                         color: AppColors.deepNavy
@@ -240,11 +332,13 @@ class _MystroChatScreenState extends State<MystroChatScreen> {
                                         fontSize: 14.5,
                                         height: 1.5)),
                               ),
-                              const SizedBox(height: 6),
-                              Text(msg['time'],
-                                  style: const TextStyle(
-                                      color: AppColors.slateGray,
-                                      fontSize: 11)),
+                              if (time.isNotEmpty) ...[
+                                const SizedBox(height: 6),
+                                Text(time,
+                                    style: const TextStyle(
+                                        color: AppColors.slateGray,
+                                        fontSize: 11)),
+                              ],
                             ],
                           ),
                         ),
@@ -279,11 +373,13 @@ class _MystroChatScreenState extends State<MystroChatScreen> {
                                         fontSize: 14.5,
                                         height: 1.4)),
                               ),
-                              const SizedBox(height: 6),
-                              Text(msg['time'],
-                                  style: const TextStyle(
-                                      color: AppColors.slateGray,
-                                      fontSize: 11)),
+                              if (time.isNotEmpty) ...[
+                                const SizedBox(height: 6),
+                                Text(time,
+                                    style: const TextStyle(
+                                        color: AppColors.slateGray,
+                                        fontSize: 11)),
+                              ],
                             ],
                           ),
                         ),
@@ -305,10 +401,7 @@ class _MystroChatScreenState extends State<MystroChatScreen> {
               separatorBuilder: (context, index) => const SizedBox(width: 8),
               itemBuilder: (context, index) {
                 return OutlinedButton(
-                  onPressed: () {
-                    _controller.text = _suggestions[index];
-                    _sendMessage();
-                  },
+                  onPressed: _isLoading ? null : () => _sendMessage(_suggestions[index]),
                   style: OutlinedButton.styleFrom(
                     foregroundColor: AppColors.teal,
                     side: const BorderSide(color: AppColors.teal),
@@ -348,7 +441,7 @@ class _MystroChatScreenState extends State<MystroChatScreen> {
                         hintStyle: TextStyle(color: AppColors.slateGray),
                         border: InputBorder.none,
                       ),
-                      onSubmitted: (_) => _sendMessage(),
+                      onSubmitted: _isLoading ? null : (_) => _sendMessage(),
                     ),
                   ),
                   Container(
@@ -358,7 +451,7 @@ class _MystroChatScreenState extends State<MystroChatScreen> {
                     child: IconButton(
                       icon: const Icon(Icons.send,
                           color: AppColors.slateGray, size: 20),
-                      onPressed: _sendMessage,
+                      onPressed: _isLoading ? null : () => _sendMessage(),
                     ),
                   ),
                 ],

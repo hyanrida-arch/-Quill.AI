@@ -1,4 +1,5 @@
 // lib/widgets/common/side_drawer.dart
+import 'dart:io';
 import 'package:flutter/material.dart';
 import '../../theme/app_colors.dart';
 
@@ -8,19 +9,21 @@ enum AppSection { home, tasks, calendar, pomodoro }
 class SideDrawer extends StatelessWidget {
   final String userName;
   final String userEmail;
+  final String? avatarPath;
   final AppSection current;
   final ValueChanged<AppSection> onSelect;
   final ValueChanged<String> onComingSoon;
-  final VoidCallback onSignOut;
+  final VoidCallback onOpenAccount;
 
   const SideDrawer({
     super.key,
     required this.userName,
     required this.userEmail,
+    required this.avatarPath,
     required this.current,
     required this.onSelect,
     required this.onComingSoon,
-    required this.onSignOut,
+    required this.onOpenAccount,
   });
 
   @override
@@ -44,52 +47,46 @@ class SideDrawer extends StatelessWidget {
               padding: const EdgeInsets.fromLTRB(20, 24, 12, 20),
               child: Row(
                 children: [
-                  Container(
-                    width: 48,
-                    height: 48,
-                    alignment: Alignment.center,
-                    decoration: const BoxDecoration(
-                      color: AppColors.deepNavy,
-                      shape: BoxShape.circle,
-                    ),
-                    child: Text(
-                      initial,
-                      style: const TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.w700,
-                        color: AppColors.white,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
                   Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          name,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w700,
-                            color: AppColors.deepNavy,
-                            letterSpacing: -0.2,
-                          ),
-                        ),
-                        if (email.isNotEmpty) ...[
-                          const SizedBox(height: 2),
-                          Text(
-                            email,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              fontSize: 13,
-                              color: AppColors.slateGray,
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(12),
+                      onTap: onOpenAccount,
+                      child: Row(
+                        children: [
+                          _Avatar(avatarPath: avatarPath, initial: initial, size: 48),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  name,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w700,
+                                    color: AppColors.deepNavy,
+                                    letterSpacing: -0.2,
+                                  ),
+                                ),
+                                if (email.isNotEmpty) ...[
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    email,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                      fontSize: 13,
+                                      color: AppColors.slateGray,
+                                    ),
+                                  ),
+                                ],
+                              ],
                             ),
                           ),
                         ],
-                      ],
+                      ),
                     ),
                   ),
                   // 1. زر الإشعارات (الناقوس)
@@ -176,16 +173,156 @@ class SideDrawer extends StatelessWidget {
             ),
 
             const Divider(height: 1, color: AppColors.border),
+            _AddMenuControl(onComingSoon: onComingSoon),
             const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+  }
+}
 
-            // Settings تحيدات من هنا، بقات غير Sign Out بوحدها
-            _DrawerRow(
-              icon: Icons.logout,
-              label: 'Sign Out',
-              color: AppColors.red,
-              onTap: onSignOut,
+/// Small circular avatar — shows the picked profile photo if one exists,
+/// otherwise falls back to the user's initial on a deepNavy circle.
+class _Avatar extends StatelessWidget {
+  final String? avatarPath;
+  final String initial;
+  final double size;
+
+  const _Avatar({required this.avatarPath, required this.initial, required this.size});
+
+  @override
+  Widget build(BuildContext context) {
+    final path = avatarPath;
+    if (path != null && path.isNotEmpty && File(path).existsSync()) {
+      return ClipOval(
+        child: Image.file(File(path), width: size, height: size, fit: BoxFit.cover),
+      );
+    }
+    return Container(
+      width: size,
+      height: size,
+      alignment: Alignment.center,
+      decoration: const BoxDecoration(color: AppColors.deepNavy, shape: BoxShape.circle),
+      child: Text(
+        initial,
+        style: TextStyle(fontSize: size * 0.42, fontWeight: FontWeight.w700, color: AppColors.white),
+      ),
+    );
+  }
+}
+
+/// Bottom "+ Add" control — expands in place to offer List / Filter / Tag,
+/// matching the shape of the reference design but in Quill.AI's own colors.
+/// The three options aren't built yet, so they route through the same
+/// onComingSoon(feature) stub used elsewhere in this drawer.
+class _AddMenuControl extends StatefulWidget {
+  final ValueChanged<String> onComingSoon;
+
+  const _AddMenuControl({required this.onComingSoon});
+
+  @override
+  State<_AddMenuControl> createState() => _AddMenuControlState();
+}
+
+class _AddMenuControlState extends State<_AddMenuControl> {
+  bool _isOpen = false;
+
+  void _toggle() => setState(() => _isOpen = !_isOpen);
+
+  void _selectOption(String option) {
+    setState(() => _isOpen = false);
+    widget.onComingSoon(option);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          AnimatedCrossFade(
+            duration: const Duration(milliseconds: 180),
+            crossFadeState: _isOpen ? CrossFadeState.showFirst : CrossFadeState.showSecond,
+            firstChild: Container(
+              margin: const EdgeInsets.only(bottom: 8),
+              decoration: BoxDecoration(
+                color: AppColors.white,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: AppColors.border),
+                boxShadow: [
+                  BoxShadow(
+                    color: AppColors.deepNavy.withValues(alpha: 0.08),
+                    blurRadius: 16,
+                    offset: const Offset(0, -4),
+                  ),
+                ],
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _AddMenuItem(icon: Icons.list, label: 'List', onTap: () => _selectOption('List')),
+                  const Divider(height: 1, color: AppColors.border),
+                  _AddMenuItem(icon: Icons.filter_list, label: 'Filter', onTap: () => _selectOption('Filter')),
+                  const Divider(height: 1, color: AppColors.border),
+                  _AddMenuItem(icon: Icons.label_outline, label: 'Tag', onTap: () => _selectOption('Tag')),
+                ],
+              ),
             ),
-            const SizedBox(height: 16),
+            secondChild: const SizedBox.shrink(),
+          ),
+          InkWell(
+            onTap: _toggle,
+            borderRadius: BorderRadius.circular(12),
+            child: SizedBox(
+              height: 52,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                child: Row(
+                  children: [
+                    Icon(_isOpen ? Icons.close : Icons.add_circle_outline,
+                        size: 22, color: AppColors.slateGray),
+                    const SizedBox(width: 16),
+                    const Text('Add',
+                        style: TextStyle(
+                            fontSize: 15, fontWeight: FontWeight.w500, color: AppColors.slateGray)),
+                    const Spacer(),
+                    IconButton(
+                      icon: const Icon(Icons.tune, size: 20, color: AppColors.slateGray),
+                      onPressed: () => widget.onComingSoon('Sort options'),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _AddMenuItem extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+
+  const _AddMenuItem({required this.icon, required this.label, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+        child: Row(
+          children: [
+            Icon(icon, size: 20, color: AppColors.deepNavy),
+            const SizedBox(width: 16),
+            Text(label,
+                style: const TextStyle(
+                    fontSize: 15, fontWeight: FontWeight.w500, color: AppColors.deepNavy)),
           ],
         ),
       ),

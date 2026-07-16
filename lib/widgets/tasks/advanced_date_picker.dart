@@ -94,10 +94,66 @@ class _AdvancedDatePickerState extends State<AdvancedDatePicker> {
     return '${_startTime!.format(context)} - ${_endTime!.format(context)}';
   }
 
+  // Shared theming so every native picker (date + time) matches Quill AI's
+  // own palette instead of falling back to Material's default purple/blue.
+  Widget _themedPicker(BuildContext context, Widget? child) {
+    return Theme(
+      data: ThemeData.light().copyWith(
+        colorScheme: const ColorScheme.light(
+          primary: AppColors.teal,
+          onPrimary: AppColors.white,
+          onSurface: AppColors.deepNavy,
+          surface: AppColors.white,
+        ),
+        textButtonTheme: TextButtonThemeData(
+          style: TextButton.styleFrom(foregroundColor: AppColors.teal),
+        ),
+        timePickerTheme: TimePickerThemeData(
+          backgroundColor: AppColors.white,
+          dialBackgroundColor: AppColors.subtleGray,
+          dialHandColor: AppColors.teal,
+          hourMinuteShape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+          hourMinuteColor: WidgetStateColor.resolveWith((states) =>
+              states.contains(WidgetState.selected)
+                  ? AppColors.lightTeal
+                  : AppColors.subtleGray),
+          hourMinuteTextColor: WidgetStateColor.resolveWith((states) =>
+              states.contains(WidgetState.selected)
+                  ? AppColors.teal
+                  : AppColors.deepNavy),
+          dialTextColor: WidgetStateColor.resolveWith((states) =>
+              states.contains(WidgetState.selected)
+                  ? AppColors.white
+                  : AppColors.deepNavy),
+          dayPeriodShape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(10),
+            side: const BorderSide(color: AppColors.border),
+          ),
+          dayPeriodBorderSide: const BorderSide(color: AppColors.border),
+          dayPeriodColor: WidgetStateColor.resolveWith((states) =>
+              states.contains(WidgetState.selected)
+                  ? AppColors.lightTeal
+                  : AppColors.white),
+          dayPeriodTextColor: WidgetStateColor.resolveWith((states) =>
+              states.contains(WidgetState.selected)
+                  ? AppColors.teal
+                  : AppColors.slateGray),
+          entryModeIconColor: AppColors.slateGray,
+          helpTextStyle: const TextStyle(
+              color: AppColors.deepNavy, fontWeight: FontWeight.w600),
+        ),
+      ),
+      child: child!,
+    );
+  }
+
   Future<void> _pickTimeRange() async {
     final start = await showTimePicker(
       context: context,
       initialTime: _startTime ?? const TimeOfDay(hour: 8, minute: 0),
+      builder: _themedPicker,
     );
     if (start == null) return;
     if (!mounted) return;
@@ -106,6 +162,7 @@ class _AdvancedDatePickerState extends State<AdvancedDatePicker> {
       context: context,
       initialTime: _endTime ??
           TimeOfDay(hour: start.hour + 1, minute: start.minute),
+      builder: _themedPicker,
     );
     if (end == null) return;
 
@@ -122,17 +179,7 @@ class _AdvancedDatePickerState extends State<AdvancedDatePicker> {
       initialDate: _selectedDate,
       firstDate: DateTime.now().subtract(const Duration(days: 365)),
       lastDate: DateTime.now().add(const Duration(days: 365 * 5)),
-      builder: (context, child) {
-        return Theme(
-          data: ThemeData.light().copyWith(
-            colorScheme: const ColorScheme.light(
-              primary: AppColors.teal,
-              onSurface: AppColors.deepNavy,
-            ),
-          ),
-          child: child!,
-        );
-      },
+      builder: _themedPicker,
     );
 
     if (picked != null && mounted) {
@@ -460,6 +507,7 @@ class _AdvancedDatePickerState extends State<AdvancedDatePicker> {
                     context: context,
                     initialTime:
                     _startTime ?? const TimeOfDay(hour: 8, minute: 0),
+                    builder: _themedPicker,
                   );
                   if (start != null) setState(() => _startTime = start);
                 },

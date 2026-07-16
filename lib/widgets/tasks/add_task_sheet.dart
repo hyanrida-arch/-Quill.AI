@@ -7,23 +7,37 @@ import '../../models/task.dart';
 import 'priority_picker.dart';
 import 'advanced_date_picker.dart';
 import 'focus_pomodoro_sheet.dart';
+import 'tag_picker.dart';
+import 'recurrence_picker.dart';
+import 'reminder_picker.dart';
 
 void showAddTaskSheet(
     BuildContext context, {
-      required Function(String, DateTime?) onAdd,
+      required ValueChanged<NewTaskDraft> onAdd,
+      DateTime? initialDate,
+      TimeOfDay? initialTime,
     }) {
   showModalBottomSheet(
     context: context,
     isScrollControlled: true,
     backgroundColor: Colors.transparent,
-    builder: (context) => AddTaskSheet(onAdd: onAdd),
+    builder: (context) => AddTaskSheet(
+      onAdd: onAdd,
+      initialDate: initialDate,
+      initialTime: initialTime,
+    ),
   );
 }
 
 class AddTaskSheet extends StatefulWidget {
-  final Function(String, DateTime?) onAdd;
+  final ValueChanged<NewTaskDraft> onAdd;
+  // Pre-fills the date/time pill — used by the Calendar's tap-empty-slot
+  // quick-create so the sheet opens already pointed at the slot you tapped
+  // instead of defaulting to "Today, no time".
+  final DateTime? initialDate;
+  final TimeOfDay? initialTime;
 
-  const AddTaskSheet({super.key, required this.onAdd});
+  const AddTaskSheet({super.key, required this.onAdd, this.initialDate, this.initialTime});
 
   @override
   State<AddTaskSheet> createState() => _AddTaskSheetState();
@@ -35,17 +49,36 @@ class _AddTaskSheetState extends State<AddTaskSheet> {
 
   TaskPriority _priority = TaskPriority.none;
   int _estimatedMinutes = 0;
+  // Set only when the user explicitly picked a session count in the Focus
+  // sheet — null falls back to the old ceil(estimatedMinutes / 25) default
+  // at the call site that actually builds the Task.
+  int? _pomodorosPlanned;
   DateTime? _exactDate;
 
   String _selectedQuickDate = 'Today';
+  // The time-of-day picked via the Date pill's AdvancedDatePicker. Both used
+  // to be read from the picker's result and then thrown away — only the
+  // date made it onto the task. Now they flow into the final NewTaskDraft.
   TimeOfDay? _selectedTime;
+  TimeOfDay? _selectedEndTime;
   bool _isTyping = false;
   ParsedTaskInput? _detectedNLP;
+  String? _tagLabel;
+  int? _tagColorValue;
+  RecurrenceRule _recurrence = const RecurrenceRule();
+  int? _reminderMinutes;
 
   @override
   void initState() {
     super.initState();
     _titleController.addListener(_onTitleChanged);
+    if (widget.initialDate != null) {
+      _exactDate = widget.initialDate;
+      _selectedQuickDate = '';
+    }
+    if (widget.initialTime != null) {
+      _selectedTime = widget.initialTime;
+    }
   }
 
   void _onTitleChanged() {
@@ -108,7 +141,18 @@ class _AddTaskSheetState extends State<AddTaskSheet> {
     if (!_isTyping) return;
     HapticFeedback.mediumImpact();
     final finalTitle = _detectedNLP?.title ?? _titleController.text.trim();
-    widget.onAdd(finalTitle, _computeFinalDate());
+    widget.onAdd(NewTaskDraft(
+      title: finalTitle,
+      dueDate: _computeFinalDate(),
+      hasTime: _selectedTime != null,
+      priority: _priority,
+      estimatedMinutes: _estimatedMinutes > 0 ? _estimatedMinutes : 30,
+      tagLabel: _tagLabel,
+      tagColorValue: _tagColorValue,
+      recurrence: _recurrence,
+      reminderMinutesBefore: _reminderMinutes,
+      pomodorosPlanned: _pomodorosPlanned,
+    ));
     Navigator.pop(context);
   }
 
@@ -269,11 +313,27 @@ class _AddTaskSheetState extends State<AddTaskSheet> {
                     final result = await AdvancedDatePicker.show(
                       context,
                       initialDate: _exactDate ?? DateTime.now(),
+                      initialStartTime: _selectedTime,
+                      initialEndTime: _selectedEndTime,
                     );
                     if (result != null && result['date'] != null) {
+                      final start = result['startTime'] as TimeOfDay?;
+                      final end = result['endTime'] as TimeOfDay?;
                       setState(() {
                         _exactDate = result['date'];
                         _selectedQuickDate = '';
+                        _selectedTime = start;
+                        _selectedEndTime = end;
+                        // A start+end range picked in the picker's Duration
+                        // tab overrides the separate duration pill — it's a
+                        // more precise signal of how long the task actually
+                        // takes than the generic 30-min default.
+                        if (start != null && end != null) {
+                          final startMins = start.hour * 60 + start.minute;
+                          var endMins = end.hour * 60 + end.minute;
+                          if (endMins <= startMins) endMins += 24 * 60;
+                          _estimatedMinutes = endMins - startMins;
+                        }
                       });
                     }
                   },
@@ -286,18 +346,59 @@ class _AddTaskSheetState extends State<AddTaskSheet> {
                   text: _estimatedMinutes == 0 ? '30 min' : '$_estimatedMinutes min',
                   isSolid: _estimatedMinutes > 0, // كيولي كحل يلا تختار
                   onTap: () async {
-                    final newDuration = await FocusPomodoroSheet.show(
+                    final result = await FocusPomodoroSheet.show(
                       context,
                       initialMinutes: _estimatedMinutes == 0 ? 30 : _estimatedMinutes,
+                      initialPomodoroMinutes: _pomodorosPlanned != null && _pomodorosPlanned! > 0
+                          ? (_estimatedMinutes / _pomodorosPlanned!).round().clamp(5, 120)
+                          : 25,
                     );
-                    if (newDuration != null) {
-                      setState(() => _estimatedMinutes = newDuration);
+                    if (result != null) {
+                      setState(() {
+                        _estimatedMinutes = result['minutes']!;
+                        _pomodorosPlanned = result['pomodoros'];
+                      });
                     }
                   },
                 ),
                 const SizedBox(width: 8),
 
-                // 4. Classroom
+                // 4. Repeat
+                _buildPill(
+                  icon: Icons.repeat,
+                  text: _recurrence.isRecurring ? _recurrence.label.replaceFirst('Repeats ', '') : 'Repeat',
+                  isSolid: _recurrence.isRecurring,
+                  onTap: () async {
+                    final result = await RecurrencePicker.show(
+                      context,
+                      current: _recurrence,
+                      baseDate: _exactDate ?? DateTime.now(),
+                    );
+                    if (result != null) setState(() => _recurrence = result);
+                  },
+                ),
+                const SizedBox(width: 8),
+
+                // 4b. Reminder
+                _buildPill(
+                  icon: Icons.notifications_none,
+                  text: _reminderMinutes == null ? 'Remind' : reminderPresetLabel(_reminderMinutes!),
+                  isSolid: _reminderMinutes != null,
+                  onTap: () async {
+                    final result = await ReminderPicker.show(
+                      context,
+                      currentMinutes: _reminderMinutes,
+                      hasDueDate: true,
+                    );
+                    if (result == null) return;
+                    setState(() {
+                      _reminderMinutes = result['remove'] == true ? null : result['minutes'] as int;
+                    });
+                  },
+                ),
+                const SizedBox(width: 8),
+
+                // 5. Classroom
                 _buildPill(
                   icon: Icons.sell_outlined,
                   text: 'Classroom',
@@ -305,15 +406,35 @@ class _AddTaskSheetState extends State<AddTaskSheet> {
                 ),
                 const SizedBox(width: 8),
 
-                // 5. Tag
+                // 6. Tag
                 _buildPill(
                   icon: Icons.label_outline,
-                  text: 'Tag',
-                  onTap: () {}, // إضافة اللوجيك من بعد
+                  text: _tagLabel ?? 'Tag',
+                  iconColor: _tagLabel != null ? Color(_tagColorValue!) : null,
+                  isSolid: _tagLabel != null,
+                  onTap: () async {
+                    final result = await TagPicker.show(
+                      context,
+                      currentLabel: _tagLabel,
+                      currentColorValue: _tagColorValue,
+                    );
+                    if (result == null) return;
+                    if (result['remove'] == true) {
+                      setState(() {
+                        _tagLabel = null;
+                        _tagColorValue = null;
+                      });
+                    } else {
+                      setState(() {
+                        _tagLabel = result['label'] as String;
+                        _tagColorValue = result['color'] as int;
+                      });
+                    }
+                  },
                 ),
                 const SizedBox(width: 8),
 
-                // 6. Subtasks
+                // 7. Subtasks
                 _buildPill(
                   icon: Icons.auto_awesome,
                   text: 'Subtasks',
