@@ -439,6 +439,11 @@ class SignUpScreen extends StatefulWidget {
   final VoidCallback onBack;
   final VoidCallback onCreate;
   final VoidCallback onSignIn;
+  // Surfaced from the real Supabase signUp() call in FlowController —
+  // null when there's nothing to show. loading disables the button and
+  // swaps its label so a slow network doesn't look like a dead tap.
+  final String? errorText;
+  final bool loading;
 
   const SignUpScreen({
     super.key,
@@ -449,6 +454,8 @@ class SignUpScreen extends StatefulWidget {
     required this.onBack,
     required this.onCreate,
     required this.onSignIn,
+    this.errorText,
+    this.loading = false,
   });
 
   @override
@@ -524,10 +531,24 @@ class _SignUpScreenState extends State<SignUpScreen> {
             QFooter(
               child: Column(
                 children: [
+                  if (widget.errorText != null) ...[
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 12),
+                      child: Text(
+                        widget.errorText!,
+                        textAlign: TextAlign.center,
+                        style: GoogleFonts.inter(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: const Color(0xFFEF4444),
+                        ),
+                      ),
+                    ),
+                  ],
                   PrimaryButton(
-                      label: 'Create Account',
+                      label: widget.loading ? 'Creating…' : 'Create Account',
                       onPressed: widget.onCreate,
-                      disabled: !valid),
+                      disabled: !valid || widget.loading),
                   const SizedBox(height: 16),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.center,
@@ -564,6 +585,8 @@ class SignInScreen extends StatefulWidget {
   final VoidCallback onSignIn;
   final VoidCallback onSignUp;
   final VoidCallback onForgot;
+  final String? errorText;
+  final bool loading;
 
   const SignInScreen({
     super.key,
@@ -574,6 +597,8 @@ class SignInScreen extends StatefulWidget {
     required this.onSignIn,
     required this.onSignUp,
     required this.onForgot,
+    this.errorText,
+    this.loading = false,
   });
 
   @override
@@ -657,10 +682,24 @@ class _SignInScreenState extends State<SignInScreen> {
             QFooter(
               child: Column(
                 children: [
+                  if (widget.errorText != null) ...[
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 12),
+                      child: Text(
+                        widget.errorText!,
+                        textAlign: TextAlign.center,
+                        style: GoogleFonts.inter(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: const Color(0xFFEF4444),
+                        ),
+                      ),
+                    ),
+                  ],
                   PrimaryButton(
-                      label: 'Sign In',
+                      label: widget.loading ? 'Signing in…' : 'Sign In',
                       onPressed: widget.onSignIn,
-                      disabled: !valid),
+                      disabled: !valid || widget.loading),
                   const SizedBox(height: 16),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.center,

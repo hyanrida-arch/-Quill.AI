@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
 import '../../models/task.dart';
 import '../../models/focus_session.dart';
+import '../../models/habit.dart';
+import '../../models/classroom.dart';
+import '../../models/notebook.dart';
+import '../../models/flashcard.dart';
 import '../../services/local_storage_service.dart';
 import '../../services/notification_service.dart';
 import '../../theme/app_colors.dart';
@@ -10,6 +14,10 @@ import 'home_screen.dart';
 import 'coming_soon_screen.dart';
 import '../tasks/tasks_body.dart';
 import '../calendar/calendar_body.dart';
+import '../habits/habits_body.dart';
+import '../classroom/classrooms_list_screen.dart';
+import '../notebook/notebooks_list_screen.dart';
+import '../flashcards/flashcards_home_screen.dart';
 import '../focus/pomodoro_dashboard.dart';
 import '../../widgets/focus/pomodoro_active_screen.dart';
 import '../chat/mystro_chat_screen.dart';
@@ -27,6 +35,10 @@ class AppShell extends StatefulWidget {
   final String? avatarPath;
   final ValueChanged<String?> onAvatarChanged;
   final VoidCallback onSignOut;
+  // Bubbles a saved name change (from EditProfileScreen, via AccountScreen)
+  // back up to FlowController so widget.userName reflects it immediately —
+  // same pattern as onAvatarChanged already uses for the avatar.
+  final ValueChanged<String> onNameChanged;
 
   const AppShell({
     super.key,
@@ -36,6 +48,7 @@ class AppShell extends StatefulWidget {
     required this.avatarPath,
     required this.onAvatarChanged,
     required this.onSignOut,
+    required this.onNameChanged,
   });
 
   @override
@@ -58,6 +71,12 @@ class _AppShellState extends State<AppShell> {
   // on-device storage on every mutation so nothing resets on app restart.
   List<Task> _tasks = [];
   List<FocusSession> _sessions = [];
+  List<Habit> _habits = [];
+  List<Classroom> _classrooms = [];
+  List<Notebook> _notebooks = [];
+  List<Note> _notes = [];
+  List<Flashcard> _flashcards = [];
+  List<CardReview> _cardReviews = [];
 
   @override
   void initState() {
@@ -68,6 +87,12 @@ class _AppShellState extends State<AppShell> {
   Future<void> _loadData() async {
     final savedTasks = await LocalStorageService.loadTasks();
     final savedSessions = await LocalStorageService.loadSessions();
+    final savedHabits = await LocalStorageService.loadHabits();
+    final savedClassrooms = await LocalStorageService.loadClassrooms();
+    final savedNotebooks = await LocalStorageService.loadNotebooks();
+    final savedNotes = await LocalStorageService.loadNotes();
+    final savedFlashcards = await LocalStorageService.loadFlashcards();
+    final savedCardReviews = await LocalStorageService.loadCardReviews();
     // null means this device has never saved a task list before — seed the
     // mock starter tasks exactly once and persist them immediately so they
     // don't get silently regenerated (with "Today" labels re-dated) on the
@@ -81,6 +106,12 @@ class _AppShellState extends State<AppShell> {
     setState(() {
       _tasks = tasks;
       _sessions = savedSessions;
+      _habits = savedHabits;
+      _classrooms = savedClassrooms;
+      _notebooks = savedNotebooks;
+      _notes = savedNotes;
+      _flashcards = savedFlashcards;
+      _cardReviews = savedCardReviews;
       _loading = false;
     });
     // Reminders are scheduled with the OS's alarm manager, not kept alive by
@@ -89,6 +120,7 @@ class _AppShellState extends State<AppShell> {
     await NotificationService.init();
     await NotificationService.requestPermission();
     await NotificationService.rescheduleAll(_tasks);
+    await NotificationService.rescheduleAllHabits(_habits);
   }
 
   void _addTask(Task task) {
@@ -134,6 +166,124 @@ class _AppShellState extends State<AppShell> {
     LocalStorageService.saveSessions(_sessions);
   }
 
+  void _addHabit(Habit habit) {
+    setState(() => _habits.insert(0, habit));
+    LocalStorageService.saveHabits(_habits);
+    NotificationService.scheduleHabitReminder(habit);
+  }
+
+  void _updateHabit(Habit updated) {
+    setState(() {
+      final index = _habits.indexWhere((h) => h.id == updated.id);
+      if (index != -1) _habits[index] = updated;
+    });
+    LocalStorageService.saveHabits(_habits);
+    NotificationService.scheduleHabitReminder(updated);
+  }
+
+  void _deleteHabit(Habit habit) {
+    setState(() => _habits.removeWhere((h) => h.id == habit.id));
+    LocalStorageService.saveHabits(_habits);
+    NotificationService.cancelHabitReminder(habit);
+  }
+
+  // Classrooms are local-only organizational containers (no backend to
+  // sync to) — persistence is the only side effect these need, unlike
+  // Tasks/Habits which also touch NotificationService.
+  void _addClassroom(Classroom classroom) {
+    setState(() => _classrooms.insert(0, classroom));
+    LocalStorageService.saveClassrooms(_classrooms);
+  }
+
+  void _updateClassroom(Classroom updated) {
+    setState(() {
+      final index = _classrooms.indexWhere((c) => c.id == updated.id);
+      if (index != -1) _classrooms[index] = updated;
+    });
+    LocalStorageService.saveClassrooms(_classrooms);
+  }
+
+  void _deleteClassroom(Classroom classroom) {
+    setState(() => _classrooms.removeWhere((c) => c.id == classroom.id));
+    LocalStorageService.saveClassrooms(_classrooms);
+  }
+
+  // ============================================================
+  // NOTEBOOK (notebooks + notes)
+  // ============================================================
+
+  void _addNotebook(Notebook notebook) {
+    setState(() => _notebooks.insert(0, notebook));
+    LocalStorageService.saveNotebooks(_notebooks);
+  }
+
+  void _updateNotebook(Notebook updated) {
+    setState(() {
+      final index = _notebooks.indexWhere((n) => n.id == updated.id);
+      if (index != -1) _notebooks[index] = updated;
+    });
+    LocalStorageService.saveNotebooks(_notebooks);
+  }
+
+  // Deleting a notebook cascades to its notes — an orphaned note with no
+  // notebook to live in isn't useful. Any flashcards already generated
+  // from those notes are left alone (their noteId just stops resolving,
+  // handled gracefully wherever a source note is looked up).
+  void _deleteNotebook(Notebook notebook) {
+    setState(() {
+      _notebooks.removeWhere((n) => n.id == notebook.id);
+      _notes.removeWhere((n) => n.notebookId == notebook.id);
+    });
+    LocalStorageService.saveNotebooks(_notebooks);
+    LocalStorageService.saveNotes(_notes);
+  }
+
+  void _addNote(Note note) {
+    setState(() => _notes.add(note));
+    LocalStorageService.saveNotes(_notes);
+  }
+
+  void _updateNote(Note updated) {
+    setState(() {
+      final index = _notes.indexWhere((n) => n.id == updated.id);
+      if (index != -1) _notes[index] = updated;
+    });
+    LocalStorageService.saveNotes(_notes);
+  }
+
+  void _deleteNote(Note note) {
+    setState(() => _notes.removeWhere((n) => n.id == note.id));
+    LocalStorageService.saveNotes(_notes);
+  }
+
+  // ============================================================
+  // FLASHCARDS (cards + review history)
+  // ============================================================
+
+  void _addFlashcard(Flashcard card) {
+    setState(() => _flashcards.add(card));
+    LocalStorageService.saveFlashcards(_flashcards);
+  }
+
+  void _updateFlashcard(Flashcard updated) {
+    setState(() {
+      final index = _flashcards.indexWhere((c) => c.id == updated.id);
+      if (index != -1) _flashcards[index] = updated;
+    });
+    LocalStorageService.saveFlashcards(_flashcards);
+  }
+
+  void _recordCardReview(String cardId, bool correct) {
+    final review = CardReview(
+      id: 'review_${DateTime.now().microsecondsSinceEpoch}',
+      cardId: cardId,
+      correct: correct,
+      reviewedAt: DateTime.now(),
+    );
+    setState(() => _cardReviews.add(review));
+    LocalStorageService.saveCardReviews(_cardReviews);
+  }
+
   void _openDrawer() => _scaffoldKey.currentState?.openDrawer();
   void _closeDrawer() => _scaffoldKey.currentState?.closeDrawer();
 
@@ -158,6 +308,12 @@ class _AppShellState extends State<AppShell> {
           _comingSoon = null;
         });
         break;
+      case AppSection.habits:
+        setState(() {
+          _section = AppSection.habits;
+          _comingSoon = null;
+        });
+        break;
       case AppSection.pomodoro:
         setState(() {
           _section = AppSection.pomodoro;
@@ -167,7 +323,71 @@ class _AppShellState extends State<AppShell> {
     }
   }
 
+  // "Classroom", "Notebook" and "Flashcards" are the drawer entries that
+  // are actually built (the rest are still real coming-soon stubs) — so
+  // they're special-cased here to push the real screen instead of setting
+  // _comingSoon. Every existing call site (SideDrawer's rows, and every
+  // header's onClassroomTap) already calls onComingSoon('<feature>'), so
+  // none of them needed to change.
   void _openComingSoon(String feature) {
+    if (feature == 'Classroom') {
+      _closeDrawer();
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => ClassroomsListScreen(
+            classrooms: _classrooms,
+            isTeacher: widget.isTeacher,
+            userName: widget.userName,
+            tasks: _tasks,
+            onCreate: _addClassroom,
+            onUpdate: _updateClassroom,
+            onDelete: _deleteClassroom,
+            onAddTask: _addTask,
+            onToggleTask: _toggleTaskDone,
+          ),
+        ),
+      );
+      return;
+    }
+    if (feature == 'Notebook') {
+      _closeDrawer();
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => NotebooksListScreen(
+            notebooks: _notebooks,
+            notes: _notes,
+            tasks: _tasks,
+            onCreate: _addNotebook,
+            onUpdate: _updateNotebook,
+            onDelete: _deleteNotebook,
+            onAddNote: _addNote,
+            onUpdateNote: _updateNote,
+            onDeleteNote: _deleteNote,
+            onAddFlashcard: _addFlashcard,
+          ),
+        ),
+      );
+      return;
+    }
+    if (feature == 'Flashcards') {
+      _closeDrawer();
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => FlashcardsHomeScreen(
+            cards: _flashcards,
+            notes: _notes,
+            notebooks: _notebooks,
+            onAddCard: _addFlashcard,
+            onUpdateCard: _updateFlashcard,
+            onRecordReview: _recordCardReview,
+          ),
+        ),
+      );
+      return;
+    }
     _closeDrawer();
     setState(() => _comingSoon = feature);
   }
@@ -181,8 +401,17 @@ class _AppShellState extends State<AppShell> {
           userName: widget.userName,
           userEmail: widget.userEmail,
           avatarPath: widget.avatarPath,
+          habits: _habits,
+          tasks: _tasks,
+          sessions: _sessions,
+          flashcards: _flashcards,
           onAvatarChanged: widget.onAvatarChanged,
           onSignOut: _confirmSignOut,
+          onOpenHabits: () {
+            Navigator.pop(context);
+            _selectSection(AppSection.habits);
+          },
+          onProfileUpdated: widget.onNameChanged,
         ),
       ),
     );
@@ -218,6 +447,7 @@ class _AppShellState extends State<AppShell> {
     final showComingSoon = _comingSoon != null;
     final isTasks = _section == AppSection.tasks;
     final isCalendar = _section == AppSection.calendar;
+    final isHabits = _section == AppSection.habits;
     final isPomodoro = _section == AppSection.pomodoro;
 
     return Scaffold(
@@ -261,11 +491,21 @@ class _AppShellState extends State<AppShell> {
                         sessions: _sessions,
                         onUpdate: _updateTask,
                         onAdd: _addTask,
+                        onDelete: _deleteTask,
                         onSessionComplete: _recordSession,
                         onMenuTap: _openDrawer,
                         onClassroomTap: () => _openComingSoon('Classroom'),
                       )
-                    : isPomodoro
+                    : isHabits
+                        // HabitsBody also owns its header (menu + add).
+                        ? HabitsBody(
+                            habits: _habits,
+                            onAdd: _addHabit,
+                            onUpdate: _updateHabit,
+                            onDelete: _deleteHabit,
+                            onMenuTap: _openDrawer,
+                          )
+                        : isPomodoro
                         // PomodoroDashboard also owns its header (menu + history + classroom).
                         ? PomodoroDashboard(
                             tasks: _tasks,

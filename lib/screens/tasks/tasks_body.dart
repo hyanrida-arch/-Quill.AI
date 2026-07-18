@@ -222,7 +222,11 @@ class _TasksBodyState extends State<TasksBody> {
     final updated = await Navigator.push<Task>(
       context,
       MaterialPageRoute(
-        builder: (_) => TaskDetailScreen(task: task, onSessionComplete: widget.onSessionComplete),
+        builder: (_) => TaskDetailScreen(
+          task: task,
+          onSessionComplete: widget.onSessionComplete,
+          onDelete: widget.onDelete,
+        ),
       ),
     );
     if (updated == null || !mounted) return;

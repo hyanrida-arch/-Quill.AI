@@ -40,6 +40,39 @@ class _MystroChatScreenState extends State<MystroChatScreen> {
 
   String _timeNow() => TimeOfDay.now().format(context);
 
+  Future<void> _confirmClearChat() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: AppColors.white,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Clear conversation?', style: TextStyle(color: AppColors.deepNavy, fontWeight: FontWeight.w700)),
+        content: const Text(
+          "This clears what you've talked about with Mystro so far. This can't be undone.",
+          style: TextStyle(color: AppColors.slateGray),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Clear', style: TextStyle(color: AppColors.red, fontWeight: FontWeight.w700)),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true && mounted) {
+      setState(() {
+        _messages.clear();
+        _messages.add({
+          'isAi': true,
+          'text': "Hi! I'm Mystro, your AI study companion. Ask me anything about "
+              "your coursework, a concept you're stuck on, or how to plan a study session.",
+          'time': '',
+        });
+      });
+    }
+  }
+
   void _scrollToBottom() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!_scrollController.hasClients) return;
@@ -231,9 +264,23 @@ class _MystroChatScreenState extends State<MystroChatScreen> {
         ),
         centerTitle: true,
         actions: [
-          IconButton(
-              icon: const Icon(Icons.more_vert, color: AppColors.deepNavy),
-              onPressed: () {}),
+          PopupMenuButton<String>(
+            icon: const Icon(Icons.more_vert, color: AppColors.deepNavy),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+            onSelected: (value) {
+              if (value == 'clear') _confirmClearChat();
+            },
+            itemBuilder: (context) => [
+              const PopupMenuItem(
+                value: 'clear',
+                child: Row(children: [
+                  Icon(Icons.delete_outline, size: 18, color: AppColors.red),
+                  SizedBox(width: 10),
+                  Text('Clear conversation', style: TextStyle(color: AppColors.red)),
+                ]),
+              ),
+            ],
+          ),
         ],
       ),
       body: Column(

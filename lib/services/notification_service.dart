@@ -20,6 +20,7 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:timezone/data/latest.dart' as tzdata;
 import 'package:timezone/timezone.dart' as tz;
 import '../models/task.dart';
+import '../models/habit.dart';
 
 class NotificationService {
   NotificationService._();
@@ -154,6 +155,59 @@ class NotificationService {
   static Future<void> rescheduleAll(List<Task> tasks) async {
     for (final t in tasks) {
       await scheduleForTask(t);
+    }
+  }
+
+  // Habits get their own id namespace (XORed with a salt) so a habit and a
+  // task that happen to hash to the same int don't clobber each other's
+  // scheduled notification.
+  static int _habitIdFor(String habitId) => (habitId.hashCode ^ 0x48616269) & 0x7fffffff;
+
+  /// Habit reminders are a daily repeating alarm at a fixed time-of-day —
+  /// unlike a task's one-shot reminder, this doesn't stop after firing
+  /// once. matchDateTimeComponents: DateTimeComponents.time is what makes
+  /// the OS re-arm it for the same time every day automatically.
+  static Future<void> scheduleHabitReminder(Habit habit) async {
+    final id = _habitIdFor(habit.id);
+    await _plugin.cancel(id: id);
+
+    final time = habit.reminderTime;
+    if (time == null) return;
+
+    final now = DateTime.now();
+    var fireAt = DateTime(now.year, now.month, now.day, time.hour, time.minute);
+    if (fireAt.isBefore(now)) fireAt = fireAt.add(const Duration(days: 1));
+
+    try {
+      await _plugin.zonedSchedule(
+        id: id,
+        title: habit.title,
+        body: 'Time to check in on "${habit.title}".',
+        scheduledDate: tz.TZDateTime.from(fireAt, tz.local),
+        notificationDetails: const NotificationDetails(
+          android: AndroidNotificationDetails(
+            _channelId,
+            _channelName,
+            channelDescription: _channelDescription,
+            importance: Importance.high,
+            priority: Priority.high,
+          ),
+          iOS: DarwinNotificationDetails(),
+          macOS: DarwinNotificationDetails(),
+        ),
+        androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+        matchDateTimeComponents: DateTimeComponents.time,
+      );
+    } catch (e) {
+      debugPrint('NotificationService: failed to schedule habit reminder "${habit.title}": $e');
+    }
+  }
+
+  static Future<void> cancelHabitReminder(Habit habit) => _plugin.cancel(id: _habitIdFor(habit.id));
+
+  static Future<void> rescheduleAllHabits(List<Habit> habits) async {
+    for (final h in habits) {
+      await scheduleHabitReminder(h);
     }
   }
 

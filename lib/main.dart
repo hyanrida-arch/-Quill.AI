@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'theme/qai_theme.dart';
 import 'theme/app_colors.dart';
 import 'screens/app_data.dart';
@@ -9,8 +10,15 @@ import 'screens/screens_auth.dart';
 import 'screens/screens_recovery.dart';
 import 'screens/home/app_shell.dart';
 import 'services/local_storage_service.dart';
+import 'services/supabase_config.dart';
+import 'services/auth_service.dart';
 
-void main() {
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await Supabase.initialize(
+    url: SupabaseConfig.url,
+    anonKey: SupabaseConfig.publishableKey,
+  );
   runApp(const QuillAIApp());
 }
 
@@ -42,30 +50,42 @@ class _FlowControllerState extends State<FlowController> {
   final QuillUserData _data = QuillUserData();
   bool _bootstrapping = true;
 
+  // Shared by SignUpScreen/SignInScreen — set while an AuthService call is
+  // in flight, cleared (and possibly replaced by an error) once it
+  // resolves. See _bootstrap()/onCreate/onSignIn below.
+  String? _authError;
+  bool _authLoading = false;
+
   @override
   void initState() {
     super.initState();
     _bootstrap();
   }
 
-  // Loads whatever was saved from a previous launch (login state, profile,
-  // avatar) before the very first frame that matters, so a returning user
-  // lands on Home instead of redoing the onboarding wizard every time they
-  // open the app.
+  // A real Supabase session (not the old local-only flag) is now the
+  // source of truth for "logged in" — see AuthService. The local profile
+  // cache still holds the avatar path (that part of the app stays local
+  // for now), but fullName/email/role come from the profiles table so a
+  // fresh install on a second device shows the real account, not a blank
+  // one.
   Future<void> _bootstrap() async {
-    final loggedIn = await LocalStorageService.isLoggedIn();
     final avatarPath = await LocalStorageService.loadAvatarPath();
-    if (loggedIn) {
-      final profile = await LocalStorageService.loadProfile();
-      _data.fullName = profile['fullName'] ?? '';
-      _data.email = profile['email'] ?? '';
-      _data.role = profile['role'];
-    }
     _data.avatarPath = avatarPath;
+
+    final signedIn = AuthService.isSignedIn;
+    if (signedIn) {
+      final profile = await AuthService.fetchProfile();
+      final user = AuthService.currentUser;
+      _data.email = user?.email ?? '';
+      _data.fullName = (profile?['display_name'] as String?)?.isNotEmpty == true
+          ? profile!['display_name'] as String
+          : _data.email.split('@').first;
+      _data.role = (profile?['is_teacher'] as bool? ?? false) ? 'teacher' : 'student';
+    }
     if (!mounted) return;
     setState(() {
       _bootstrapping = false;
-      _route = loggedIn ? Routes.home : Routes.splash;
+      _route = signedIn ? Routes.home : Routes.splash;
     });
   }
 
@@ -292,22 +312,39 @@ class _FlowControllerState extends State<FlowController> {
           fullName: _data.fullName,
           email: _data.email,
           password: _data.password,
+          errorText: _authError,
+          loading: _authLoading,
           onChange: (n, e, p) => setState(() {
             _data.fullName = n;
             _data.email = e;
             _data.password = p;
+            _authError = null;
           }),
           onBack: _back,
-          onCreate: () {
-            LocalStorageService.saveLoggedInProfile(
-              fullName: _data.fullName,
-              email: _data.email.isNotEmpty ? _data.email : _data.signInEmail,
-              role: _data.role ?? 'student',
-            );
+          onCreate: () async {
             setState(() {
-              _history.clear();
-              _route = Routes.home;
+              _authLoading = true;
+              _authError = null;
             });
+            final result = await AuthService.signUp(
+              email: _data.email.isNotEmpty ? _data.email : _data.signInEmail,
+              password: _data.password,
+              displayName: _data.fullName,
+              isTeacher: _data.role == 'teacher',
+            );
+            if (!mounted) return;
+            if (result.success) {
+              setState(() {
+                _authLoading = false;
+                _history.clear();
+                _route = Routes.home;
+              });
+            } else {
+              setState(() {
+                _authLoading = false;
+                _authError = result.error;
+              });
+            }
           },
           onSignIn: () => _go(Routes.signIn),
         );
@@ -317,25 +354,41 @@ class _FlowControllerState extends State<FlowController> {
           key: const ValueKey('signin'),
           email: _data.signInEmail,
           password: _data.signInPassword,
+          errorText: _authError,
+          loading: _authLoading,
           onChange: (e, p) => setState(() {
             _data.signInEmail = e;
             _data.signInPassword = p;
+            _authError = null;
           }),
           onBack: _history.isNotEmpty ? _back : null,
-          onSignIn: () {
-            // No real backend to check credentials against yet — this
-            // mirrors a returning user, so fall back to whatever name/role
-            // is already known instead of wiping it.
-            LocalStorageService.saveLoggedInProfile(
-              fullName: _data.fullName.isNotEmpty
-                  ? _data.fullName
-                  : _data.signInEmail.split('@').first,
-              email: _data.signInEmail.isNotEmpty
-                  ? _data.signInEmail
-                  : _data.email,
-              role: _data.role ?? 'student',
-            );
+          onSignIn: () async {
             setState(() {
+              _authLoading = true;
+              _authError = null;
+            });
+            final result = await AuthService.signIn(
+              email: _data.signInEmail,
+              password: _data.signInPassword,
+            );
+            if (!mounted) return;
+            if (!result.success) {
+              setState(() {
+                _authLoading = false;
+                _authError = result.error;
+              });
+              return;
+            }
+            final profile = await AuthService.fetchProfile();
+            final user = AuthService.currentUser;
+            if (!mounted) return;
+            setState(() {
+              _data.email = user?.email ?? _data.signInEmail;
+              _data.fullName = (profile?['display_name'] as String?)?.isNotEmpty == true
+                  ? profile!['display_name'] as String
+                  : _data.signInEmail.split('@').first;
+              _data.role = (profile?['is_teacher'] as bool? ?? false) ? 'teacher' : 'student';
+              _authLoading = false;
               _history.clear();
               _route = Routes.home;
             });
@@ -393,7 +446,9 @@ class _FlowControllerState extends State<FlowController> {
             LocalStorageService.saveAvatarPath(path);
             setState(() => _data.avatarPath = path);
           },
+          onNameChanged: (name) => setState(() => _data.fullName = name),
           onSignOut: () {
+            AuthService.signOut();
             LocalStorageService.signOut();
             setState(() {
               _history.clear();

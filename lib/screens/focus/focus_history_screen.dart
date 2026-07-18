@@ -1,12 +1,85 @@
 // lib/screens/focus/focus_history_screen.dart
+//
+// Was a fully hardcoded mockup (fake dates, a fabricated "78% completion"
+// AI insight) — rewritten to read the app's real FocusSession list.
+// Deliberately does NOT show any AI-generated insight: Mystro doesn't
+// actually read tasks/sessions yet (see the "points de vigilance" section
+// of the project report), so a real insight box will come once that's
+// true, not before.
 import 'package:flutter/material.dart';
 import '../../theme/app_colors.dart';
+import '../../models/focus_session.dart';
 
 class FocusHistoryScreen extends StatelessWidget {
-  const FocusHistoryScreen({super.key});
+  final List<FocusSession> sessions;
+
+  const FocusHistoryScreen({super.key, required this.sessions});
+
+  static DateTime _dateOnly(DateTime d) => DateTime(d.year, d.month, d.day);
+
+  List<FocusSession> get _sorted {
+    final list = List<FocusSession>.from(sessions);
+    list.sort((a, b) => b.completedAt.compareTo(a.completedAt));
+    return list;
+  }
+
+  List<FocusSession> get _todaySessions {
+    final today = _dateOnly(DateTime.now());
+    return sessions.where((s) => _dateOnly(s.completedAt) == today).toList();
+  }
+
+  int get _pomosToday => _todaySessions.where((s) => s.isSuccessful).length;
+
+  Duration get _focusedTodayDuration {
+    final totalSeconds = _todaySessions.fold<int>(0, (sum, s) => sum + s.actualSeconds);
+    return Duration(seconds: totalSeconds);
+  }
+
+  /// Consecutive days (counting back from today) with at least one
+  /// successful session — same "streak" definition used by Habits.
+  int get _dayStreak {
+    final doneDays = sessions.where((s) => s.isSuccessful).map((s) => _dateOnly(s.completedAt)).toSet();
+    var day = _dateOnly(DateTime.now());
+    var streak = 0;
+    var guard = 0;
+    while (doneDays.contains(day) && guard < 3650) {
+      streak++;
+      day = day.subtract(const Duration(days: 1));
+      guard++;
+    }
+    return streak;
+  }
+
+  Map<DateTime, List<FocusSession>> get _groupedByDay {
+    final map = <DateTime, List<FocusSession>>{};
+    for (final s in _sorted) {
+      final day = _dateOnly(s.completedAt);
+      map.putIfAbsent(day, () => []).add(s);
+    }
+    return map;
+  }
+
+  String _dayLabel(DateTime day) {
+    final today = _dateOnly(DateTime.now());
+    final diff = today.difference(day).inDays;
+    if (diff == 0) return 'Today';
+    if (diff == 1) return 'Yesterday';
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    return '${months[day.month - 1]} ${day.day}';
+  }
+
+  String _timeLabel(DateTime dt) {
+    final h = dt.hour % 12 == 0 ? 12 : dt.hour % 12;
+    final m = dt.minute.toString().padLeft(2, '0');
+    final ampm = dt.hour < 12 ? 'AM' : 'PM';
+    return '$h:$m $ampm';
+  }
 
   @override
   Widget build(BuildContext context) {
+    final grouped = _groupedByDay;
+    final focused = _focusedTodayDuration;
+
     return Scaffold(
       backgroundColor: AppColors.white,
       appBar: AppBar(
@@ -21,32 +94,12 @@ class FocusHistoryScreen extends StatelessWidget {
           style: TextStyle(color: AppColors.deepNavy, fontWeight: FontWeight.w800, fontSize: 20),
         ),
         centerTitle: false,
-        actions: [
-          IconButton(
-            icon: const Badge(
-              backgroundColor: AppColors.teal,
-              smallSize: 8,
-              child: Icon(Icons.notifications_none, color: AppColors.deepNavy),
-            ),
-            onPressed: () {},
-          ),
-          IconButton(
-            icon: const Badge(
-              backgroundColor: AppColors.teal,
-              smallSize: 8,
-              child: Icon(Icons.school_outlined, color: AppColors.deepNavy),
-            ),
-            onPressed: () {},
-          ),
-          const SizedBox(width: 8),
-        ],
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // ─── 1. Top Stats Card ───
             Container(
               padding: const EdgeInsets.symmetric(vertical: 24),
               decoration: BoxDecoration(
@@ -64,117 +117,48 @@ class FocusHistoryScreen extends StatelessWidget {
                 mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
-                  _buildStatColumn('4', 'POMOS TODAY'),
+                  _buildStatColumn('$_pomosToday', 'POMOS TODAY'),
                   _buildDivider(),
-                  _buildMainStatColumn('2h', '35m', 'FOCUSED'),
+                  _buildMainStatColumn('${focused.inHours}h', '${focused.inMinutes % 60}m', 'FOCUSED TODAY'),
                   _buildDivider(),
-                  _buildStatColumn('8', 'DAY STREAK'),
-                ],
-              ),
-            ),
-            const SizedBox(height: 16),
-
-            // ─── 2. Links ───
-            const Align(
-              alignment: Alignment.centerRight,
-              child: Text(
-                'View weekly stats →',
-                style: TextStyle(color: AppColors.teal, fontWeight: FontWeight.w600, fontSize: 13),
-              ),
-            ),
-            const SizedBox(height: 24),
-
-            // ─── 3. AI Insight Pattern ───
-            Container(
-              decoration: BoxDecoration(
-                color: AppColors.teal.withValues(alpha: 0.08),
-                borderRadius: BorderRadius.circular(16),
-              ),
-              child: Row(
-                children: [
-                  Container(
-                    width: 4,
-                    height: 100,
-                    decoration: const BoxDecoration(
-                      color: AppColors.teal,
-                      borderRadius: BorderRadius.horizontal(left: Radius.circular(16)),
-                    ),
-                  ),
-                  const Expanded(
-                    child: Padding(
-                      padding: EdgeInsets.all(16),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              Icon(Icons.auto_awesome, color: AppColors.teal, size: 14),
-                              SizedBox(width: 8),
-                              Text(
-                                'PATTERN DETECTED',
-                                style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: AppColors.teal, letterSpacing: 1.2),
-                              ),
-                            ],
-                          ),
-                          SizedBox(height: 8),
-                          Text(
-                            'Your most productive time is 9–11 AM (78% completion rate). Want me to suggest tasks for that window?',
-                            style: TextStyle(fontSize: 13.5, color: AppColors.deepNavy, height: 1.5, fontWeight: FontWeight.w500),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
+                  _buildStatColumn('$_dayStreak', 'DAY STREAK'),
                 ],
               ),
             ),
             const SizedBox(height: 32),
 
-            // ─── 4. History List ───
-            const Text(
-              'Today, May 30',
-              style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: AppColors.deepNavy),
-            ),
-            const SizedBox(height: 12),
-
-            _buildSessionCard(
-              time: '9:00 — 9:25 AM',
-              title: 'Read Chapter 4',
-              subtitle: '0 pauses',
-              duration: '25m',
-              isSuccess: true,
-            ),
-            const SizedBox(height: 10),
-            _buildSessionCard(
-              time: '9:35 — 10:00 AM',
-              title: 'Read Chapter 4',
-              subtitle: '1 pause',
-              duration: '25m',
-              isSuccess: true,
-            ),
-            const SizedBox(height: 10),
-            _buildSessionCard(
-              time: '11:10 — 11:28 AM',
-              title: 'Problem set #3',
-              subtitle: '2 pauses · 1 interruption',
-              duration: '18m',
-              isSuccess: false,
-            ),
-
-            const SizedBox(height: 32),
-            const Text(
-              'Yesterday, May 29',
-              style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: AppColors.deepNavy),
-            ),
-            const SizedBox(height: 12),
-            _buildSessionCard(
-              time: '4:15 — 4:40 PM',
-              title: 'Write Essay Draft',
-              subtitle: '0 pauses',
-              duration: '25m',
-              isSuccess: true,
-            ),
-            const SizedBox(height: 40),
+            if (grouped.isEmpty)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 40),
+                child: Center(
+                  child: Column(
+                    children: [
+                      const Icon(Icons.timer_outlined, size: 40, color: AppColors.slateGray),
+                      const SizedBox(height: 12),
+                      const Text('No focus sessions yet',
+                          style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: AppColors.deepNavy)),
+                      const SizedBox(height: 6),
+                      Text('Finish a Pomodoro session and it will show up here.',
+                          style: TextStyle(fontSize: 12.5, color: AppColors.slateGray.withValues(alpha: 0.9))),
+                    ],
+                  ),
+                ),
+              )
+            else
+              ...grouped.entries.expand((entry) {
+                final day = entry.key;
+                final daySessions = entry.value;
+                return [
+                  Text(_dayLabel(day),
+                      style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: AppColors.deepNavy)),
+                  const SizedBox(height: 12),
+                  ...daySessions.map((s) => Padding(
+                        padding: const EdgeInsets.only(bottom: 10),
+                        child: _buildSessionCard(s),
+                      )),
+                  const SizedBox(height: 22),
+                ];
+              }),
           ],
         ),
       ),
@@ -217,15 +201,12 @@ class FocusHistoryScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildSessionCard({
-    required String time,
-    required String title,
-    required String subtitle,
-    required String duration,
-    required bool isSuccess,
-  }) {
-    final badgeColor = isSuccess ? AppColors.teal : AppColors.amber;
-    final badgeIcon = isSuccess ? Icons.check : Icons.warning_amber_rounded;
+  Widget _buildSessionCard(FocusSession s) {
+    final badgeColor = s.isSuccessful ? AppColors.teal : AppColors.amber;
+    final badgeIcon = s.isSuccessful ? Icons.check : Icons.warning_amber_rounded;
+    final endTime = s.completedAt;
+    final startTime = endTime.subtract(Duration(seconds: s.actualSeconds));
+    final subtitle = s.pauseCount == 0 ? '0 pauses' : '${s.pauseCount} pause${s.pauseCount == 1 ? '' : 's'}';
 
     return Container(
       padding: const EdgeInsets.all(16),
@@ -242,27 +223,30 @@ class FocusHistoryScreen extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(time, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: AppColors.deepNavy)),
+                Text('${_timeLabel(startTime)} — ${_timeLabel(endTime)}',
+                    style: const TextStyle(fontSize: 11.5, color: AppColors.slateGray, fontWeight: FontWeight.w600)),
                 const SizedBox(height: 4),
-                Text(title, style: const TextStyle(fontSize: 14, color: AppColors.slateGray)),
+                Text(s.taskTitle,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w700, color: AppColors.deepNavy)),
                 const SizedBox(height: 2),
                 Text(subtitle, style: const TextStyle(fontSize: 12, color: AppColors.slateGray)),
               ],
             ),
           ),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-            decoration: BoxDecoration(
-              color: badgeColor.withValues(alpha: 0.1),
-              borderRadius: BorderRadius.circular(100),
-            ),
-            child: Row(
-              children: [
-                Icon(badgeIcon, size: 14, color: badgeColor),
-                const SizedBox(width: 4),
-                Text(duration, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: badgeColor)),
-              ],
-            ),
+          const SizedBox(width: 12),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(4),
+                decoration: BoxDecoration(shape: BoxShape.circle, color: badgeColor.withValues(alpha: 0.15)),
+                child: Icon(badgeIcon, size: 14, color: badgeColor),
+              ),
+              const SizedBox(height: 4),
+              Text('${s.actualMinutes}m', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.deepNavy)),
+            ],
           ),
         ],
       ),

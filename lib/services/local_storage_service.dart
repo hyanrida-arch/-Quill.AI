@@ -9,11 +9,21 @@ import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/task.dart';
 import '../models/focus_session.dart';
+import '../models/habit.dart';
+import '../models/classroom.dart';
+import '../models/notebook.dart';
+import '../models/flashcard.dart';
 
 class LocalStorageService {
   static const _kTasksKey = 'quill_tasks_v1';
   static const _kSessionsKey = 'quill_sessions_v1';
   static const _kAvatarKey = 'quill_avatar_path_v1';
+  static const _kHabitsKey = 'quill_habits_v1';
+  static const _kClassroomsKey = 'quill_classrooms_v1';
+  static const _kNotebooksKey = 'quill_notebooks_v1';
+  static const _kNotesKey = 'quill_notes_v1';
+  static const _kFlashcardsKey = 'quill_flashcards_v1';
+  static const _kCardReviewsKey = 'quill_card_reviews_v1';
 
   // Login/profile persistence — lets a returning user skip the onboarding
   // wizard and land straight on Home instead of redoing it every launch.
@@ -72,6 +82,140 @@ class LocalStorageService {
     final prefs = await SharedPreferences.getInstance();
     final raw = jsonEncode(sessions.map((s) => s.toJson()).toList());
     await prefs.setString(_kSessionsKey, raw);
+  }
+
+  // ============================================================
+  // HABITS
+  // ============================================================
+
+  static Future<List<Habit>> loadHabits() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_kHabitsKey);
+    if (raw == null) return [];
+    try {
+      final list = jsonDecode(raw) as List<dynamic>;
+      return list
+          .map((e) => Habit.fromJson(e as Map<String, dynamic>))
+          .toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  static Future<void> saveHabits(List<Habit> habits) async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = jsonEncode(habits.map((h) => h.toJson()).toList());
+    await prefs.setString(_kHabitsKey, raw);
+  }
+
+  // ============================================================
+  // CLASSROOMS
+  // ============================================================
+
+  static Future<List<Classroom>> loadClassrooms() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_kClassroomsKey);
+    if (raw == null) return [];
+    try {
+      final list = jsonDecode(raw) as List<dynamic>;
+      return list
+          .map((e) => Classroom.fromJson(e as Map<String, dynamic>))
+          .toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  static Future<void> saveClassrooms(List<Classroom> classrooms) async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = jsonEncode(classrooms.map((c) => c.toJson()).toList());
+    await prefs.setString(_kClassroomsKey, raw);
+  }
+
+  // ============================================================
+  // NOTEBOOK (notebooks + notes)
+  // ============================================================
+
+  static Future<List<Notebook>> loadNotebooks() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_kNotebooksKey);
+    if (raw == null) return [];
+    try {
+      final list = jsonDecode(raw) as List<dynamic>;
+      return list
+          .map((e) => Notebook.fromJson(e as Map<String, dynamic>))
+          .toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  static Future<void> saveNotebooks(List<Notebook> notebooks) async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = jsonEncode(notebooks.map((n) => n.toJson()).toList());
+    await prefs.setString(_kNotebooksKey, raw);
+  }
+
+  static Future<List<Note>> loadNotes() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_kNotesKey);
+    if (raw == null) return [];
+    try {
+      final list = jsonDecode(raw) as List<dynamic>;
+      return list.map((e) => Note.fromJson(e as Map<String, dynamic>)).toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  static Future<void> saveNotes(List<Note> notes) async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = jsonEncode(notes.map((n) => n.toJson()).toList());
+    await prefs.setString(_kNotesKey, raw);
+  }
+
+  // ============================================================
+  // FLASHCARDS (cards + review history)
+  // ============================================================
+
+  static Future<List<Flashcard>> loadFlashcards() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_kFlashcardsKey);
+    if (raw == null) return [];
+    try {
+      final list = jsonDecode(raw) as List<dynamic>;
+      return list
+          .map((e) => Flashcard.fromJson(e as Map<String, dynamic>))
+          .toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  static Future<void> saveFlashcards(List<Flashcard> cards) async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = jsonEncode(cards.map((c) => c.toJson()).toList());
+    await prefs.setString(_kFlashcardsKey, raw);
+  }
+
+  static Future<List<CardReview>> loadCardReviews() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_kCardReviewsKey);
+    if (raw == null) return [];
+    try {
+      final list = jsonDecode(raw) as List<dynamic>;
+      return list
+          .map((e) => CardReview.fromJson(e as Map<String, dynamic>))
+          .toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  static Future<void> saveCardReviews(List<CardReview> reviews) async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = jsonEncode(reviews.map((r) => r.toJson()).toList());
+    await prefs.setString(_kCardReviewsKey, raw);
   }
 
   // ============================================================

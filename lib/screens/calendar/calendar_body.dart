@@ -6,6 +6,7 @@ import '../../models/task.dart';
 import '../../models/focus_session.dart';
 import '../tasks/task_detail_screen.dart';
 import '../../widgets/tasks/add_task_sheet.dart';
+import '../../widgets/tasks/advanced_date_picker.dart';
 
 enum CalendarViewType { agenda, day, week, month }
 
@@ -30,6 +31,7 @@ class CalendarBody extends StatefulWidget {
   final List<FocusSession> sessions;
   final ValueChanged<Task> onUpdate;
   final ValueChanged<Task> onAdd;
+  final ValueChanged<Task> onDelete;
   final ValueChanged<FocusSession> onSessionComplete;
 
   const CalendarBody({
@@ -40,6 +42,7 @@ class CalendarBody extends StatefulWidget {
     required this.sessions,
     required this.onUpdate,
     required this.onAdd,
+    required this.onDelete,
     required this.onSessionComplete,
   });
 
@@ -181,10 +184,101 @@ class _CalendarBodyState extends State<CalendarBody> {
     final updated = await Navigator.push<Task>(
       context,
       MaterialPageRoute(
-        builder: (_) => TaskDetailScreen(task: task, onSessionComplete: widget.onSessionComplete),
+        builder: (_) => TaskDetailScreen(
+          task: task,
+          onSessionComplete: widget.onSessionComplete,
+          onDelete: widget.onDelete,
+        ),
       ),
     );
     if (updated != null) widget.onUpdate(updated);
+  }
+
+  // Long-press quick actions on any event (hourly-grid block or agenda
+  // card) — "like Google Calendar": move a task to a different date
+  // without dragging pixel-for-pixel across day columns, or remove it
+  // straight from the calendar. Recurring tasks can still be deleted here,
+  // but not moved — same restriction as the drag handle above, since a
+  // recurring task's dueDate is a rolling "next occurrence" pointer, not a
+  // fixed slot.
+  void _showMoveOrDeleteSheet(Task t) {
+    HapticFeedback.selectionClick();
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: AppColors.white,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (!t.recurrence.isRecurring)
+              ListTile(
+                leading: const Icon(Icons.event_repeat, color: AppColors.deepNavy),
+                title: const Text('Move to another date'),
+                onTap: () {
+                  Navigator.pop(sheetContext);
+                  _moveToAnotherDate(t);
+                },
+              ),
+            ListTile(
+              leading: const Icon(Icons.delete_outline, color: AppColors.red),
+              title: const Text('Delete', style: TextStyle(color: AppColors.red)),
+              onTap: () {
+                Navigator.pop(sheetContext);
+                _confirmDeleteFromCalendar(t);
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _moveToAnotherDate(Task t) async {
+    final result = await AdvancedDatePicker.show(
+      context,
+      initialDate: t.dueDate ?? DateTime.now(),
+      initialStartTime: t.hasTime && t.dueDate != null
+          ? TimeOfDay(hour: t.dueDate!.hour, minute: t.dueDate!.minute)
+          : null,
+    );
+    if (result == null || result['date'] == null) return;
+    final newDate = result['date'] as DateTime;
+    final startTime = result['startTime'] as TimeOfDay?;
+    final finalDate = startTime != null
+        ? DateTime(newDate.year, newDate.month, newDate.day, startTime.hour, startTime.minute)
+        : (t.hasTime && t.dueDate != null
+            ? DateTime(newDate.year, newDate.month, newDate.day, t.dueDate!.hour, t.dueDate!.minute)
+            : DateTime(newDate.year, newDate.month, newDate.day));
+    HapticFeedback.lightImpact();
+    widget.onUpdate(t.copyWith(
+      dueDate: finalDate,
+      dueLabel: Task.dateLabelFor(finalDate),
+      hasTime: startTime != null || t.hasTime,
+    ));
+  }
+
+  Future<void> _confirmDeleteFromCalendar(Task t) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: AppColors.white,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Delete task?', style: TextStyle(color: AppColors.deepNavy, fontWeight: FontWeight.w700)),
+        content: Text(
+          'This removes "${t.title}". This can\'t be undone.',
+          style: const TextStyle(color: AppColors.slateGray),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Delete', style: TextStyle(color: AppColors.red, fontWeight: FontWeight.w700)),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true) widget.onDelete(t);
   }
 
   void _jumpToToday() {
@@ -524,13 +618,20 @@ class _CalendarBodyState extends State<CalendarBody> {
 
     return Column(
       children: [
-        Row(
-          children: [
-            const SizedBox(width: _timeColWidth),
-            for (final day in days) Expanded(child: _dayHeaderCell(day, days.length)),
-          ],
-        ),
-        const Divider(height: 1, color: AppColors.border),
+        // Day view already shows the selected date via its own scrollable
+        // week strip above this grid (_buildDayGridView) — repeating a
+        // single circled date here just duplicated it. Week view still
+        // needs this row since it's the only place each of its 7 columns
+        // gets labeled.
+        if (days.length > 1) ...[
+          Row(
+            children: [
+              const SizedBox(width: _timeColWidth),
+              for (final day in days) Expanded(child: _dayHeaderCell(day, days.length)),
+            ],
+          ),
+          const Divider(height: 1, color: AppColors.border),
+        ],
         if (showAllDayRow) ...[
           Row(
             children: [
@@ -863,6 +964,7 @@ class _CalendarBodyState extends State<CalendarBody> {
       height: height,
       child: GestureDetector(
         onTap: () => _openDetail(t),
+        onLongPress: () => _showMoveOrDeleteSheet(t),
         onVerticalDragStart: !canDragResize
             ? null
             : (_) {
@@ -1157,6 +1259,7 @@ class _CalendarBodyState extends State<CalendarBody> {
     final tag = done ? '✓ DONE' : (t.isOverdue ? 'OVERDUE' : t.priorityLabel);
     return GestureDetector(
       onTap: () => _openDetail(t),
+      onLongPress: () => _showMoveOrDeleteSheet(t),
       child: Container(
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(

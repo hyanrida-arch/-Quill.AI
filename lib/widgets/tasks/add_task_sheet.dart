@@ -271,7 +271,11 @@ class _AddTaskSheetState extends State<AddTaskSheet> {
                   const SizedBox(height: 16),
                   Row(
                     children: [
-                      _buildAiBtn('Yes', isPrimary: true, onTap: () {}),
+                      // The suggested date/priority is already applied live as
+                      // soon as it's detected (see _onTitleChanged) — "Yes"
+                      // just confirms and dismisses the banner, same as Skip
+                      // dismisses it without keeping the suggestion.
+                      _buildAiBtn('Yes', isPrimary: true, onTap: () => setState(() => _detectedNLP = null)),
                       const SizedBox(width: 8),
                       _buildAiBtn('Skip', isPrimary: false, onTap: () => setState(() => _detectedNLP = null)),
                     ],
@@ -398,15 +402,7 @@ class _AddTaskSheetState extends State<AddTaskSheet> {
                 ),
                 const SizedBox(width: 8),
 
-                // 5. Classroom
-                _buildPill(
-                  icon: Icons.sell_outlined,
-                  text: 'Classroom',
-                  onTap: () {}, // إضافة اللوجيك من بعد
-                ),
-                const SizedBox(width: 8),
-
-                // 6. Tag
+                // 5. Tag
                 _buildPill(
                   icon: Icons.label_outline,
                   text: _tagLabel ?? 'Tag',
@@ -431,14 +427,6 @@ class _AddTaskSheetState extends State<AddTaskSheet> {
                       });
                     }
                   },
-                ),
-                const SizedBox(width: 8),
-
-                // 7. Subtasks
-                _buildPill(
-                  icon: Icons.auto_awesome,
-                  text: 'Subtasks',
-                  onTap: () {}, // إضافة اللوجيك من بعد
                 ),
               ],
             ),

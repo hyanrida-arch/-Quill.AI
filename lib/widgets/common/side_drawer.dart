@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 import '../../theme/app_colors.dart';
 
 /// Sections the AppShell can switch between.
-enum AppSection { home, tasks, calendar, pomodoro }
+enum AppSection { home, tasks, calendar, habits, pomodoro }
 
 class SideDrawer extends StatelessWidget {
   final String userName;
@@ -130,8 +130,8 @@ class SideDrawer extends StatelessWidget {
                     _DrawerRow(
                       icon: Icons.track_changes_outlined,
                       label: 'Habits',
-                      isSoon: true,
-                      onTap: () => onComingSoon('Habits'),
+                      isActive: current == AppSection.habits,
+                      onTap: () => onSelect(AppSection.habits),
                     ),
                     _DrawerRow(
                       icon: Icons.timer_outlined,
@@ -146,19 +146,16 @@ class SideDrawer extends StatelessWidget {
                     _DrawerRow(
                       icon: Icons.menu_book_outlined,
                       label: 'Notebook',
-                      isSoon: true,
                       onTap: () => onComingSoon('Notebook'),
                     ),
                     _DrawerRow(
                       icon: Icons.layers_outlined,
                       label: 'Flashcards',
-                      isSoon: true,
                       onTap: () => onComingSoon('Flashcards'),
                     ),
                     _DrawerRow(
                       icon: Icons.people_outline,
                       label: 'Classroom',
-                      isSoon: true,
                       onTap: () => onComingSoon('Classroom'),
                     ),
                     _DrawerRow(

@@ -332,7 +332,7 @@ class _PomodoroDashboardState extends State<PomodoroDashboard> {
                     icon: const Icon(Icons.bar_chart_outlined, color: AppColors.deepNavy, size: 24),
                     onPressed: () => Navigator.push(
                       context,
-                      MaterialPageRoute(builder: (_) => const FocusHistoryScreen()),
+                      MaterialPageRoute(builder: (_) => FocusHistoryScreen(sessions: widget.sessions)),
                     ),
                   ),
                   IconButton(

@@ -2,32 +2,125 @@
 //
 // Opened by tapping the avatar/name in the side drawer. Structure mirrors
 // the reference design (hero + Badges + Achievement Score + Focus Stats +
-// Weekly Habit Status), but restyled in Quill.AI's own light palette rather
-// than the reference's dark theme. Badges / Achievement Score / Weekly Habit
-// Status have no real data model behind them yet (Habits is still a "SOON"
-// stub elsewhere in the app), so those numbers are static placeholders —
-// Focus Statistics reuses the same mock totals already shown in
-// FocusHistoryScreen so the two screens don't contradict each other.
+// Weekly Habit Status), restyled in Quill.AI's own light palette. Badges,
+// Achievement Score and Focus Statistics are all real now — computed from
+// the app's actual Task/FocusSession/Habit/Flashcard lists via
+// AchievementsService, not the static placeholder numbers this screen used
+// to show. Weekly Habit Status was already real (built earlier). The one
+// remaining "no data" chart (inside Achievement Score) stays honest on
+// purpose — there's no stored day-by-day score history to plot, only a
+// live current total, so a real line there would mean inventing history
+// that doesn't exist.
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import '../../theme/app_colors.dart';
+import '../../models/habit.dart';
+import '../../models/task.dart';
+import '../../models/focus_session.dart';
+import '../../models/flashcard.dart';
+import '../../services/achievements_service.dart';
+import 'edit_profile_screen.dart';
 
 class AccountScreen extends StatelessWidget {
   final String userName;
   final String userEmail;
   final String? avatarPath;
+  final List<Habit> habits;
+  final List<Task> tasks;
+  final List<FocusSession> sessions;
+  final List<Flashcard> flashcards;
   final ValueChanged<String?> onAvatarChanged;
   final VoidCallback onSignOut;
+  final VoidCallback onOpenHabits;
+  // Bubbles a saved name change from EditProfileScreen back up to
+  // AppShell -> FlowController, so the header/drawer reflect it without
+  // needing a full app restart. Phone/password updates don't need this —
+  // nothing else on screen displays them.
+  final ValueChanged<String> onProfileUpdated;
 
   const AccountScreen({
     super.key,
     required this.userName,
     required this.userEmail,
     required this.avatarPath,
+    required this.habits,
+    required this.tasks,
+    required this.sessions,
+    required this.flashcards,
     required this.onAvatarChanged,
     required this.onSignOut,
+    required this.onOpenHabits,
+    required this.onProfileUpdated,
   });
+
+  static const _weekdayLabels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
+  /// Total individual habit check-ins across the current week (Mon-Sun) —
+  /// summed over every non-archived habit, not just one.
+  int _weeklyCheckIns() {
+    final now = DateTime.now();
+    final monday = DateTime(now.year, now.month, now.day).subtract(Duration(days: now.weekday - 1));
+    var count = 0;
+    for (final h in habits.where((h) => !h.archived)) {
+      for (var i = 0; i < 7; i++) {
+        final day = monday.add(Duration(days: i));
+        if (day.isAfter(now)) break;
+        if (h.isDoneOn(day)) count++;
+      }
+    }
+    return count;
+  }
+
+  /// Whether at least one habit was completed on each day of the current
+  /// week — feeds the Mon..Sun dot row.
+  List<bool> _weekdayDots() {
+    final now = DateTime.now();
+    final monday = DateTime(now.year, now.month, now.day).subtract(Duration(days: now.weekday - 1));
+    final active = habits.where((h) => !h.archived).toList();
+    return List.generate(7, (i) {
+      final day = monday.add(Duration(days: i));
+      if (active.isEmpty) return false;
+      return active.any((h) => h.isDoneOn(day));
+    });
+  }
+
+  // ============================================================
+  // FOCUS STATISTICS — real, current-week numbers from actual
+  // FocusSession data (previously hardcoded: "35" pomos, "25h 26m",
+  // "3h 38m" daily average, none of it computed from anything).
+  // ============================================================
+  static DateTime _dateOnly(DateTime d) => DateTime(d.year, d.month, d.day);
+
+  DateTime get _weekStart {
+    final now = DateTime.now();
+    return _dateOnly(now).subtract(Duration(days: now.weekday - 1));
+  }
+
+  List<FocusSession> get _weekSessions =>
+      sessions.where((s) => s.isSuccessful && !s.completedAt.isBefore(_weekStart)).toList();
+
+  int get _weekPomos => _weekSessions.length;
+
+  Duration get _weekFocusDuration =>
+      Duration(seconds: _weekSessions.fold<int>(0, (sum, s) => sum + s.actualSeconds));
+
+  Duration get _dailyAverage => Duration(seconds: _weekFocusDuration.inSeconds ~/ 7);
+
+  String _fmtHm(Duration d) => '${d.inHours}h ${d.inMinutes % 60}m';
+
+  /// Minutes focused per weekday (Mon..Sun) this week — feeds the real bar
+  /// chart that replaced the old static "No Data" box.
+  List<int> _weekdayMinutes() {
+    final start = _weekStart;
+    return List.generate(7, (i) {
+      final day = start.add(Duration(days: i));
+      final mins = _weekSessions
+          .where((s) => _dateOnly(s.completedAt) == day)
+          .fold<int>(0, (sum, s) => sum + (s.actualSeconds ~/ 60));
+      return mins;
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -62,7 +155,16 @@ class AccountScreen extends StatelessWidget {
               if (value == 'signout') {
                 onSignOut();
               } else {
-                _comingSoon(context, 'Account settings');
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => EditProfileScreen(
+                      currentName: name,
+                      currentEmail: email,
+                      onSaved: onProfileUpdated,
+                    ),
+                  ),
+                );
               }
             },
             itemBuilder: (context) => [
@@ -81,69 +183,75 @@ class AccountScreen extends StatelessWidget {
         children: [
           _buildHero(context, name, initial),
           const SizedBox(height: 16),
-          _buildCard(
-            title: 'My Badges',
-            trailing: '13',
-            onTap: () => _comingSoon(context, 'Badges'),
-            child: SizedBox(
-              height: 56,
-              child: Row(
-                children: [
-                  _badge(Icons.shield, AppColors.red, '5'),
-                  _badge(Icons.shield, AppColors.amber, '4'),
-                  _badge(Icons.emoji_events, AppColors.slateGray, '3'),
-                  _badge(Icons.stars_rounded, AppColors.teal, '3'),
-                  _badge(Icons.shield, AppColors.amber, '3'),
-                  _badge(Icons.military_tech, AppColors.slateGray, '2'),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: 16),
-          _buildCard(
-            title: 'My Achievement Score',
-            onTap: () => _comingSoon(context, 'Achievement Score'),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+          Builder(builder: (context) {
+            final achievements = AchievementsService.compute(
+              tasks: tasks,
+              sessions: sessions,
+              habits: habits,
+              flashcards: flashcards,
+            );
+            final unlockedBadges = achievements.badges.where((b) => b.tier > 0).length;
+            return Column(
               children: [
-                Row(
-                  children: [
-                    _statBlock('Achievement Score', '356'),
-                    const SizedBox(width: 32),
-                    _statBlock('Level Lv.3', 'Hardworker'),
-                  ],
+                _buildCard(
+                  title: 'My Badges',
+                  trailing: '$unlockedBadges',
+                  child: SizedBox(
+                    height: 56,
+                    child: Row(
+                      children: [
+                        for (final b in achievements.badges)
+                          _badge(b.icon, b.tier > 0 ? b.color : AppColors.border, '${b.tier}'),
+                      ],
+                    ),
+                  ),
                 ),
-                const SizedBox(height: 20),
-                _noDataChart(scoreDayLabels),
+                const SizedBox(height: 16),
+                _buildCard(
+                  title: 'My Achievement Score',
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          _statBlock('Achievement Score', '${achievements.score}'),
+                          const SizedBox(width: 32),
+                          _statBlock('Level Lv.${achievements.level}', achievements.levelTitle),
+                        ],
+                      ),
+                      const SizedBox(height: 20),
+                      _noDataChart(scoreDayLabels),
+                    ],
+                  ),
+                ),
               ],
-            ),
-          ),
+            );
+          }),
           const SizedBox(height: 16),
           _buildCard(
             title: 'Focus Statistics',
-            onTap: () => _comingSoon(context, 'Focus Statistics'),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Row(
                   children: [
-                    _statBlock('Total Pomos', '35'),
+                    _statBlock('Total Pomos', '$_weekPomos'),
                     const SizedBox(width: 32),
-                    _statBlock('Total Focus Duration', '25h 26m'),
+                    _statBlock('Total Focus Duration', _fmtHm(_weekFocusDuration)),
                   ],
                 ),
                 const SizedBox(height: 20),
-                _noDataChart(const ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']),
+                _weekBarChart(_weekdayMinutes()),
                 const SizedBox(height: 12),
                 const Divider(height: 1, color: AppColors.border),
                 const SizedBox(height: 12),
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: const [
-                    Text('Daily Average',
+                  children: [
+                    const Text('Daily Average',
                         style: TextStyle(fontSize: 13, color: AppColors.slateGray, fontWeight: FontWeight.w600)),
-                    Text('3h 38m',
-                        style: TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: AppColors.deepNavy)),
+                    Text(_fmtHm(_dailyAverage),
+                        style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: AppColors.deepNavy)),
                   ],
                 ),
               ],
@@ -152,7 +260,7 @@ class AccountScreen extends StatelessWidget {
           const SizedBox(height: 16),
           _buildCard(
             title: 'Weekly Habit Status',
-            onTap: () => _comingSoon(context, 'Habits'),
+            onTap: onOpenHabits,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -164,20 +272,14 @@ class AccountScreen extends StatelessWidget {
                   ],
                 ),
                 const SizedBox(height: 4),
-                const Text('0',
-                    style: TextStyle(fontSize: 26, fontWeight: FontWeight.w800, color: AppColors.deepNavy)),
+                Text('${_weeklyCheckIns()}',
+                    style: const TextStyle(fontSize: 26, fontWeight: FontWeight.w800, color: AppColors.deepNavy)),
                 const SizedBox(height: 20),
-                const Row(
+                Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    _HabitDay(label: 'Mon'),
-                    _HabitDay(label: 'Tue'),
-                    _HabitDay(label: 'Wed'),
-                    _HabitDay(label: 'Thu'),
-                    _HabitDay(label: 'Fri'),
-                    _HabitDay(label: 'Sat'),
-                    _HabitDay(label: 'Sun'),
-                  ],
+                  children: List.generate(7, (i) {
+                    return _HabitDay(label: _weekdayLabels[i], done: _weekdayDots()[i]);
+                  }),
                 ),
               ],
             ),
@@ -437,6 +539,55 @@ class AccountScreen extends StatelessWidget {
     );
   }
 
+  /// Real per-weekday minutes-focused bars — replaces the static "No Data"
+  /// box the Focus Statistics card used to show even though real
+  /// FocusSession data existed the whole time, just never wired here.
+  Widget _weekBarChart(List<int> minutesPerDay) {
+    const labels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+    final maxMinutes = minutesPerDay.fold<int>(0, (m, v) => v > m ? v : m);
+    return Column(
+      children: [
+        SizedBox(
+          height: 90,
+          child: minutesPerDay.every((m) => m == 0)
+              ? Container(
+                  width: double.infinity,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(color: AppColors.subtleGray, borderRadius: BorderRadius.circular(12)),
+                  child: Text('No sessions this week',
+                      style: TextStyle(fontSize: 13, color: AppColors.slateGray.withValues(alpha: 0.7))),
+                )
+              : Row(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    for (final m in minutesPerDay)
+                      Expanded(
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 3),
+                          child: Container(
+                            height: maxMinutes == 0 ? 4 : 6 + (m / maxMinutes) * 74,
+                            decoration: BoxDecoration(
+                              color: m > 0 ? AppColors.teal : AppColors.subtleGray,
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+        ),
+        const SizedBox(height: 8),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            for (final l in labels)
+              Text(l, style: const TextStyle(fontSize: 10, color: AppColors.slateGray)),
+          ],
+        ),
+      ],
+    );
+  }
+
   Widget _noDataChart(List<String> labels) {
     return Column(
       children: [
@@ -489,7 +640,8 @@ class AccountScreen extends StatelessWidget {
 
 class _HabitDay extends StatelessWidget {
   final String label;
-  const _HabitDay({required this.label});
+  final bool done;
+  const _HabitDay({required this.label, this.done = false});
 
   @override
   Widget build(BuildContext context) {
@@ -498,10 +650,13 @@ class _HabitDay extends StatelessWidget {
         Container(
           width: 26,
           height: 26,
+          alignment: Alignment.center,
           decoration: BoxDecoration(
             shape: BoxShape.circle,
-            border: Border.all(color: AppColors.border, width: 1.5),
+            color: done ? AppColors.teal : Colors.transparent,
+            border: Border.all(color: done ? AppColors.teal : AppColors.border, width: 1.5),
           ),
+          child: done ? const Icon(Icons.check, size: 14, color: Colors.white) : null,
         ),
         const SizedBox(height: 6),
         Text(label, style: const TextStyle(fontSize: 11, color: AppColors.slateGray, fontWeight: FontWeight.w500)),

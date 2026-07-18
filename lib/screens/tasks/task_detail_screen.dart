@@ -17,8 +17,18 @@ import '../../widgets/focus/pomodoro_active_screen.dart';
 class TaskDetailScreen extends StatefulWidget {
   final Task task;
   final ValueChanged<FocusSession> onSessionComplete;
+  // Optional: only TasksBody currently has a delete callback to hand down
+  // (CalendarBody/TaskSearchScreen don't support deleting yet). The 3-dot
+  // menu only appears when this is provided, rather than showing an empty
+  // popup from the screens that can't act on it.
+  final ValueChanged<Task>? onDelete;
 
-  const TaskDetailScreen({super.key, required this.task, required this.onSessionComplete});
+  const TaskDetailScreen({
+    super.key,
+    required this.task,
+    required this.onSessionComplete,
+    this.onDelete,
+  });
 
   @override
   State<TaskDetailScreen> createState() => _TaskDetailScreenState();
@@ -88,6 +98,32 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> {
   void _toggleSubtask(int index) {
     HapticFeedback.lightImpact();
     setState(() => _subtasks[index] = _subtasks[index].copyWith(isDone: !_subtasks[index].isDone));
+  }
+
+  Future<void> _confirmDelete() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: AppColors.white,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Delete task?', style: TextStyle(color: AppColors.deepNavy, fontWeight: FontWeight.w700)),
+        content: Text(
+          'This removes "${widget.task.title}". This can\'t be undone.',
+          style: const TextStyle(color: AppColors.slateGray),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Delete', style: TextStyle(color: AppColors.red, fontWeight: FontWeight.w700)),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true && mounted) {
+      widget.onDelete?.call(widget.task);
+      Navigator.pop(context);
+    }
   }
 
   Future<void> _openTagPicker() async {
@@ -166,10 +202,24 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> {
           onPressed: () => Navigator.pop(context, _editedTask),
         ),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.more_vert, color: AppColors.deepNavy),
-            onPressed: () {},
-          ),
+          if (widget.onDelete != null)
+            PopupMenuButton<String>(
+              icon: const Icon(Icons.more_vert, color: AppColors.deepNavy),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+              onSelected: (value) {
+                if (value == 'delete') _confirmDelete();
+              },
+              itemBuilder: (context) => [
+                const PopupMenuItem(
+                  value: 'delete',
+                  child: Row(children: [
+                    Icon(Icons.delete_outline, size: 18, color: AppColors.red),
+                    SizedBox(width: 10),
+                    Text('Delete Task', style: TextStyle(color: AppColors.red)),
+                  ]),
+                ),
+              ],
+            ),
         ],
       ),
       body: SafeArea(
